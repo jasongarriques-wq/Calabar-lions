@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Navbar } from "@/components/navbar";
+import { GuestSignInButton } from "@/components/guest-signin-button";
 
 export default function Home() {
   return (
@@ -18,13 +19,15 @@ export default function Home() {
             parents around the houses, classes, clubs, and traditions that make
             Calabar what it is.
           </p>
-          <div className="mt-10 flex flex-wrap gap-4">
+          <div className="mt-10 flex flex-wrap items-center gap-4">
             <Link href="/signup" className="btn-primary">
               Create your account
             </Link>
             <Link href="/login" className="btn-secondary">
               Log in
             </Link>
+            <span className="text-sm text-stone-500">or</span>
+            <GuestSignInButton className="w-full max-w-[16rem]" />
           </div>
         </div>
       </section>

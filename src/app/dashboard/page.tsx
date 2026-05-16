@@ -2,6 +2,7 @@ import { Navbar } from "@/components/navbar";
 import { CalabarStudentCard } from "@/components/calabar-student-card";
 import { SbaProgressCard } from "@/components/sba-progress-card";
 import { ResourceCard } from "@/components/resource-card";
+import { GuestUpgradeBanner } from "@/components/guest-upgrade-banner";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata = { title: "Dashboard" };
@@ -69,8 +70,15 @@ export default async function DashboardPage() {
     <main>
       <Navbar />
       <section className="mx-auto max-w-7xl px-6 py-10">
+        {user?.is_anonymous && <GuestUpgradeBanner />}
         <h1 className="font-display text-3xl font-bold tracking-tight">
-          Welcome{profile?.display_name ? `, ${profile.display_name}` : ""}.
+          Welcome
+          {profile?.display_name
+            ? `, ${profile.display_name}`
+            : user?.is_anonymous
+              ? ", guest"
+              : ""}
+          .
         </h1>
         <p className="mt-2 text-stone-600">Your day at a glance.</p>
 
