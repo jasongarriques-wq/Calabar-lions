@@ -9,3 +9,30 @@
 html {
   scroll-behavior: smooth;
 }
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-sm transition focus:outline-none focus:ring-2 focus:ring-offset-2;
+  }
+  .btn-primary {
+    @apply btn bg-calabar-green-700 text-white hover:bg-calabar-green-800 focus:ring-calabar-green-500;
+  }
+  .btn-secondary {
+    @apply btn border border-calabar-green-200 bg-white text-calabar-green-800 hover:bg-calabar-green-50 focus:ring-calabar-green-300;
+  }
+  .btn-gold {
+    @apply btn bg-calabar-gold-500 text-calabar-ink hover:bg-calabar-gold-400 focus:ring-calabar-gold-300;
+  }
+  .card {
+    @apply rounded-2xl border border-stone-200 bg-white p-6 shadow-sm;
+  }
+  .input {
+    @apply w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-calabar-green-500 focus:outline-none focus:ring-2 focus:ring-calabar-green-200;
+  }
+  .label {
+    @apply mb-1 block text-sm font-medium text-stone-700;
+  }
+  .pill {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+}

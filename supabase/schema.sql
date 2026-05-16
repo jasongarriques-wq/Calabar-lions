@@ -1,0 +1,594 @@
+-- Calabar Lions — Supabase schema
+-- Run with: supabase db push  (or paste into the SQL editor)
+
+-------------------------------------------------------------------------------
+-- Extensions
+-------------------------------------------------------------------------------
+create extension if not exists "uuid-ossp";
+create extension if not exists "pgcrypto";
+
+-------------------------------------------------------------------------------
+-- Enums
+-------------------------------------------------------------------------------
+do $$ begin
+  create type user_role as enum (
+    'student', 'teacher', 'admin', 'prefect', 'house_captain',
+    'club_leader', 'coach', 'alumni', 'parent'
+  );
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type track as enum ('csec', 'cape', 'other');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type group_type as enum (
+    'house', 'form', 'class', 'subject', 'sba', 'club', 'sport', 'alumni'
+  );
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type sba_status as enum ('not_started', 'in_progress', 'submitted', 'graded');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type report_status as enum ('open', 'reviewing', 'resolved', 'dismissed');
+exception when duplicate_object then null; end $$;
+
+-------------------------------------------------------------------------------
+-- Schools (multi-tenant ready; single row in MVP)
+-------------------------------------------------------------------------------
+create table if not exists schools (
+  id uuid primary key default uuid_generate_v4(),
+  name text not null default 'Calabar High School',
+  city text default 'Kingston',
+  country text default 'Jamaica',
+  created_at timestamptz not null default now()
+);
+
+insert into schools (id, name) values
+  ('00000000-0000-0000-0000-000000000001', 'Calabar High School')
+on conflict (id) do nothing;
+
+-------------------------------------------------------------------------------
+-- Academic years
+-------------------------------------------------------------------------------
+create table if not exists academic_years (
+  id uuid primary key default uuid_generate_v4(),
+  school_id uuid not null references schools(id) on delete cascade,
+  label text not null,                  -- e.g. "2026/2027"
+  starts_on date,
+  ends_on date,
+  is_current boolean not null default false,
+  unique (school_id, label)
+);
+
+-------------------------------------------------------------------------------
+-- Houses
+-------------------------------------------------------------------------------
+create table if not exists houses (
+  id uuid primary key default uuid_generate_v4(),
+  school_id uuid not null references schools(id) on delete cascade,
+  name text not null,
+  motto text,
+  color text,                            -- hex, e.g. "#137c3d"
+  emblem_url text,
+  created_at timestamptz not null default now(),
+  unique (school_id, name)
+);
+
+insert into houses (school_id, name, motto, color) values
+  ('00000000-0000-0000-0000-000000000001', 'Manning', 'Strength in unity', '#137c3d'),
+  ('00000000-0000-0000-0000-000000000001', 'Cunningham', 'Knowledge is power', '#0c4d28'),
+  ('00000000-0000-0000-0000-000000000001', 'Lumb', 'Honour above all', '#d4af37'),
+  ('00000000-0000-0000-0000-000000000001', 'Davis', 'Lions never fall', '#7c5e1b')
+on conflict (school_id, name) do nothing;
+
+-------------------------------------------------------------------------------
+-- Classes (e.g. 4A, 5R, L6S2)
+-------------------------------------------------------------------------------
+create table if not exists classes (
+  id uuid primary key default uuid_generate_v4(),
+  school_id uuid not null references schools(id) on delete cascade,
+  academic_year_id uuid references academic_years(id) on delete set null,
+  name text not null,                    -- "4A"
+  form text not null,                    -- "4"
+  form_teacher_id uuid,                  -- references profiles(id)
+  created_at timestamptz not null default now()
+);
+
+-------------------------------------------------------------------------------
+-- Subjects (CSEC / CAPE catalog)
+-------------------------------------------------------------------------------
+create table if not exists subjects (
+  id uuid primary key default uuid_generate_v4(),
+  code text not null unique,             -- "MATH", "POB"
+  name text not null,
+  track track not null default 'csec'
+);
+
+insert into subjects (code, name, track) values
+  ('MATH', 'Mathematics', 'csec'),
+  ('ENG-A', 'English A', 'csec'),
+  ('ENG-B', 'English B', 'csec'),
+  ('POB', 'Principles of Business', 'csec'),
+  ('POA', 'Principles of Accounts', 'csec'),
+  ('BIO', 'Biology', 'csec'),
+  ('CHEM', 'Chemistry', 'csec'),
+  ('PHY', 'Physics', 'csec'),
+  ('IT', 'Information Technology', 'csec'),
+  ('HIST', 'Caribbean History', 'csec'),
+  ('GEO', 'Geography', 'csec'),
+  ('SOC', 'Social Studies', 'csec'),
+  ('PURE-MATH', 'Pure Mathematics', 'cape'),
+  ('APP-MATH', 'Applied Mathematics', 'cape'),
+  ('CAPE-BIO', 'Biology (CAPE)', 'cape'),
+  ('CAPE-CHEM', 'Chemistry (CAPE)', 'cape'),
+  ('CAPE-PHY', 'Physics (CAPE)', 'cape'),
+  ('COMS', 'Communication Studies', 'cape'),
+  ('CARIB', 'Caribbean Studies', 'cape')
+on conflict (code) do nothing;
+
+-------------------------------------------------------------------------------
+-- Profiles (1:1 with auth.users)
+-------------------------------------------------------------------------------
+create table if not exists profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  school_id uuid references schools(id) on delete set null
+    default '00000000-0000-0000-0000-000000000001',
+  role user_role not null default 'student',
+  full_name text,
+  display_name text,
+  student_id text,                       -- optional
+  date_of_birth date,
+  is_minor boolean generated always as (
+    case when date_of_birth is null then true
+         else (current_date - date_of_birth) < interval '18 years'
+    end
+  ) stored,
+  form text,                             -- "1".."6L".."6U"
+  class_id uuid references classes(id) on delete set null,
+  class_group text,                      -- denormalized name e.g. "4A"
+  academic_year text,
+  track track,
+  house_id uuid references houses(id) on delete set null,
+  avatar_url text,
+  bio text,
+  approved boolean not null default true,  -- toggled false for teachers/admins until verified
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Auto-create a profile when a new auth user signs up.
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer as $$
+begin
+  insert into public.profiles (id, full_name, role, approved)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'full_name', new.email),
+    coalesce((new.raw_user_meta_data->>'role')::user_role, 'student'),
+    case
+      when coalesce(new.raw_user_meta_data->>'role', 'student') in ('teacher', 'admin')
+      then false
+      else true
+    end
+  )
+  on conflict (id) do nothing;
+  return new;
+end $$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-------------------------------------------------------------------------------
+-- Student ↔ Subjects
+-------------------------------------------------------------------------------
+create table if not exists student_subjects (
+  student_id uuid not null references profiles(id) on delete cascade,
+  subject_id uuid not null references subjects(id) on delete cascade,
+  is_sba boolean not null default false,
+  primary key (student_id, subject_id)
+);
+
+-------------------------------------------------------------------------------
+-- Groups (house / form / class / subject / sba / club / sport / alumni)
+-------------------------------------------------------------------------------
+create table if not exists groups (
+  id uuid primary key default uuid_generate_v4(),
+  school_id uuid not null references schools(id) on delete cascade,
+  type group_type not null,
+  name text not null,
+  description text,
+  cover_url text,
+  is_private boolean not null default false,
+  approved boolean not null default true,
+  ref_id uuid,                           -- optional link to house/class/subject
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists group_members (
+  group_id uuid not null references groups(id) on delete cascade,
+  user_id uuid not null references profiles(id) on delete cascade,
+  role text not null default 'member',   -- member | mod | leader
+  joined_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+
+-------------------------------------------------------------------------------
+-- Posts & comments
+-------------------------------------------------------------------------------
+create table if not exists posts (
+  id uuid primary key default uuid_generate_v4(),
+  group_id uuid references groups(id) on delete cascade,
+  author_id uuid not null references profiles(id) on delete cascade,
+  body text not null,
+  attachments jsonb default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists comments (
+  id uuid primary key default uuid_generate_v4(),
+  post_id uuid not null references posts(id) on delete cascade,
+  author_id uuid not null references profiles(id) on delete cascade,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
+-------------------------------------------------------------------------------
+-- Announcements (from prefects / admin / house captains)
+-------------------------------------------------------------------------------
+create table if not exists announcements (
+  id uuid primary key default uuid_generate_v4(),
+  school_id uuid not null references schools(id) on delete cascade,
+  author_id uuid not null references profiles(id) on delete cascade,
+  title text not null,
+  body text not null,
+  audience text not null,                -- "school" | "house:<id>" | "form:<n>" | "class:<id>"
+  pinned boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+-------------------------------------------------------------------------------
+-- Resources (past papers, notes)
+-------------------------------------------------------------------------------
+create table if not exists resources (
+  id uuid primary key default uuid_generate_v4(),
+  school_id uuid not null references schools(id) on delete cascade,
+  uploader_id uuid references profiles(id) on delete set null,
+  subject text not null,
+  kind text not null,                    -- "past_paper" | "notes" | "video" | "link"
+  title text not null,
+  url text not null,
+  storage_path text,
+  approved boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+-------------------------------------------------------------------------------
+-- SBA projects
+-------------------------------------------------------------------------------
+create table if not exists sba_projects (
+  id uuid primary key default uuid_generate_v4(),
+  student_id uuid not null references profiles(id) on delete cascade,
+  subject text not null,
+  title text not null,
+  due_date date,
+  status sba_status not null default 'not_started',
+  percent_complete int not null default 0 check (percent_complete between 0 and 100),
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-------------------------------------------------------------------------------
+-- Clubs & sports
+-------------------------------------------------------------------------------
+create table if not exists clubs (
+  id uuid primary key default uuid_generate_v4(),
+  school_id uuid not null references schools(id) on delete cascade,
+  name text not null,
+  description text,
+  leader_id uuid references profiles(id) on delete set null,
+  meeting_day text,
+  meeting_time text,
+  approved boolean not null default false
+);
+
+create table if not exists sports_teams (
+  id uuid primary key default uuid_generate_v4(),
+  school_id uuid not null references schools(id) on delete cascade,
+  name text not null,                    -- "Manning Cup Senior"
+  sport text not null,                   -- "football"
+  coach_id uuid references profiles(id) on delete set null,
+  season text                            -- "2026/2027"
+);
+
+-------------------------------------------------------------------------------
+-- Mentors
+-------------------------------------------------------------------------------
+create table if not exists mentors (
+  id uuid primary key references profiles(id) on delete cascade,
+  full_name text not null,
+  graduation_year int,
+  industry text,
+  bio text,
+  avatar_url text,
+  linkedin_url text,
+  capacity int not null default 2,
+  taken int not null default 0,
+  approved boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+-------------------------------------------------------------------------------
+-- Badges
+-------------------------------------------------------------------------------
+create table if not exists badges (
+  id uuid primary key default uuid_generate_v4(),
+  slug text not null unique,
+  name text not null,
+  description text,
+  icon text
+);
+
+create table if not exists user_badges (
+  user_id uuid not null references profiles(id) on delete cascade,
+  badge_id uuid not null references badges(id) on delete cascade,
+  awarded_at timestamptz not null default now(),
+  primary key (user_id, badge_id)
+);
+
+-------------------------------------------------------------------------------
+-- Notifications
+-------------------------------------------------------------------------------
+create table if not exists notifications (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid not null references profiles(id) on delete cascade,
+  kind text not null,
+  payload jsonb not null default '{}'::jsonb,
+  read_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-------------------------------------------------------------------------------
+-- Reports / moderation
+-------------------------------------------------------------------------------
+create table if not exists reports (
+  id uuid primary key default uuid_generate_v4(),
+  reporter_id uuid references profiles(id) on delete set null,
+  target_type text not null,             -- "post" | "comment" | "user" | "group"
+  target_id uuid,
+  reason text not null,
+  details text,
+  status report_status not null default 'open',
+  reviewed_by uuid references profiles(id) on delete set null,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-------------------------------------------------------------------------------
+-- Helpers
+-------------------------------------------------------------------------------
+create or replace function public.is_admin(uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (select 1 from profiles where id = uid and role = 'admin');
+$$;
+
+create or replace function public.is_staff(uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (
+    select 1 from profiles
+    where id = uid and role in ('admin', 'teacher')
+  );
+$$;
+
+-------------------------------------------------------------------------------
+-- Row Level Security
+-------------------------------------------------------------------------------
+alter table profiles enable row level security;
+alter table houses enable row level security;
+alter table classes enable row level security;
+alter table subjects enable row level security;
+alter table student_subjects enable row level security;
+alter table groups enable row level security;
+alter table group_members enable row level security;
+alter table posts enable row level security;
+alter table comments enable row level security;
+alter table announcements enable row level security;
+alter table resources enable row level security;
+alter table sba_projects enable row level security;
+alter table clubs enable row level security;
+alter table sports_teams enable row level security;
+alter table mentors enable row level security;
+alter table badges enable row level security;
+alter table user_badges enable row level security;
+alter table notifications enable row level security;
+alter table reports enable row level security;
+
+-- Profiles: anyone signed in can read; only owner (or admin) can update.
+drop policy if exists "profiles select" on profiles;
+create policy "profiles select" on profiles for select
+  using (auth.uid() is not null);
+
+drop policy if exists "profiles update self" on profiles;
+create policy "profiles update self" on profiles for update
+  using (auth.uid() = id or is_admin(auth.uid()))
+  with check (auth.uid() = id or is_admin(auth.uid()));
+
+-- Houses / classes / subjects: readable by all signed-in users; only admins write.
+drop policy if exists "reference read" on houses;
+create policy "reference read" on houses for select using (auth.uid() is not null);
+drop policy if exists "reference write" on houses;
+create policy "reference write" on houses for all
+  using (is_admin(auth.uid())) with check (is_admin(auth.uid()));
+
+drop policy if exists "classes read" on classes;
+create policy "classes read" on classes for select using (auth.uid() is not null);
+drop policy if exists "classes write" on classes;
+create policy "classes write" on classes for all
+  using (is_staff(auth.uid())) with check (is_staff(auth.uid()));
+
+drop policy if exists "subjects read" on subjects;
+create policy "subjects read" on subjects for select using (auth.uid() is not null);
+drop policy if exists "subjects write" on subjects;
+create policy "subjects write" on subjects for all
+  using (is_admin(auth.uid())) with check (is_admin(auth.uid()));
+
+-- Student subjects: each student manages their own.
+drop policy if exists "student_subjects own" on student_subjects;
+create policy "student_subjects own" on student_subjects for all
+  using (auth.uid() = student_id or is_staff(auth.uid()))
+  with check (auth.uid() = student_id or is_staff(auth.uid()));
+
+-- Groups: readable when public or member; writable by staff and group leaders.
+drop policy if exists "groups read" on groups;
+create policy "groups read" on groups for select
+  using (
+    auth.uid() is not null
+    and (
+      approved
+      and (not is_private or exists (
+        select 1 from group_members gm where gm.group_id = id and gm.user_id = auth.uid()
+      ))
+    )
+  );
+drop policy if exists "groups write" on groups;
+create policy "groups write" on groups for all
+  using (is_staff(auth.uid()) or auth.uid() = created_by)
+  with check (is_staff(auth.uid()) or auth.uid() = created_by);
+
+drop policy if exists "group_members read" on group_members;
+create policy "group_members read" on group_members for select using (auth.uid() is not null);
+drop policy if exists "group_members self" on group_members;
+create policy "group_members self" on group_members for all
+  using (auth.uid() = user_id or is_staff(auth.uid()))
+  with check (auth.uid() = user_id or is_staff(auth.uid()));
+
+-- Posts & comments: visible to members of the group; author can edit/delete; staff override.
+drop policy if exists "posts read" on posts;
+create policy "posts read" on posts for select using (
+  auth.uid() is not null and (
+    group_id is null or exists (
+      select 1 from group_members gm where gm.group_id = posts.group_id and gm.user_id = auth.uid()
+    ) or is_staff(auth.uid())
+  )
+);
+drop policy if exists "posts write" on posts;
+create policy "posts write" on posts for insert
+  with check (auth.uid() = author_id);
+drop policy if exists "posts update" on posts;
+create policy "posts update" on posts for update
+  using (auth.uid() = author_id or is_staff(auth.uid()))
+  with check (auth.uid() = author_id or is_staff(auth.uid()));
+drop policy if exists "posts delete" on posts;
+create policy "posts delete" on posts for delete
+  using (auth.uid() = author_id or is_staff(auth.uid()));
+
+drop policy if exists "comments read" on comments;
+create policy "comments read" on comments for select using (auth.uid() is not null);
+drop policy if exists "comments write" on comments;
+create policy "comments write" on comments for insert with check (auth.uid() = author_id);
+drop policy if exists "comments update" on comments;
+create policy "comments update" on comments for update
+  using (auth.uid() = author_id or is_staff(auth.uid()))
+  with check (auth.uid() = author_id or is_staff(auth.uid()));
+drop policy if exists "comments delete" on comments;
+create policy "comments delete" on comments for delete
+  using (auth.uid() = author_id or is_staff(auth.uid()));
+
+-- Announcements: readable by everyone signed in; only staff/prefects post.
+drop policy if exists "announcements read" on announcements;
+create policy "announcements read" on announcements for select using (auth.uid() is not null);
+drop policy if exists "announcements write" on announcements;
+create policy "announcements write" on announcements for all
+  using (
+    is_staff(auth.uid()) or exists (
+      select 1 from profiles
+      where id = auth.uid() and role in ('prefect', 'house_captain', 'club_leader', 'coach')
+    )
+  )
+  with check (
+    is_staff(auth.uid()) or exists (
+      select 1 from profiles
+      where id = auth.uid() and role in ('prefect', 'house_captain', 'club_leader', 'coach')
+    )
+  );
+
+-- Resources: readable by all signed in; teachers/admins can write.
+drop policy if exists "resources read" on resources;
+create policy "resources read" on resources for select using (auth.uid() is not null and approved);
+drop policy if exists "resources write" on resources;
+create policy "resources write" on resources for all
+  using (is_staff(auth.uid())) with check (is_staff(auth.uid()));
+
+-- SBA projects: student owns their own; teachers can read/write for their students.
+drop policy if exists "sba own" on sba_projects;
+create policy "sba own" on sba_projects for all
+  using (auth.uid() = student_id or is_staff(auth.uid()))
+  with check (auth.uid() = student_id or is_staff(auth.uid()));
+
+-- Clubs & sports: readable by all signed in; staff/admin manage.
+drop policy if exists "clubs read" on clubs;
+create policy "clubs read" on clubs for select using (auth.uid() is not null and approved);
+drop policy if exists "clubs write" on clubs;
+create policy "clubs write" on clubs for all
+  using (is_staff(auth.uid())) with check (is_staff(auth.uid()));
+
+drop policy if exists "sports read" on sports_teams;
+create policy "sports read" on sports_teams for select using (auth.uid() is not null);
+drop policy if exists "sports write" on sports_teams;
+create policy "sports write" on sports_teams for all
+  using (is_staff(auth.uid())) with check (is_staff(auth.uid()));
+
+-- Mentors: anyone signed in can read approved mentors; only the mentor or admin writes.
+drop policy if exists "mentors read" on mentors;
+create policy "mentors read" on mentors for select
+  using (auth.uid() is not null and (approved or auth.uid() = id or is_admin(auth.uid())));
+drop policy if exists "mentors self" on mentors;
+create policy "mentors self" on mentors for all
+  using (auth.uid() = id or is_admin(auth.uid()))
+  with check (auth.uid() = id or is_admin(auth.uid()));
+
+-- Badges
+drop policy if exists "badges read" on badges;
+create policy "badges read" on badges for select using (true);
+drop policy if exists "badges write" on badges;
+create policy "badges write" on badges for all
+  using (is_admin(auth.uid())) with check (is_admin(auth.uid()));
+
+drop policy if exists "user_badges read" on user_badges;
+create policy "user_badges read" on user_badges for select using (auth.uid() is not null);
+drop policy if exists "user_badges write" on user_badges;
+create policy "user_badges write" on user_badges for all
+  using (is_staff(auth.uid())) with check (is_staff(auth.uid()));
+
+-- Notifications: each user sees their own.
+drop policy if exists "notifications own" on notifications;
+create policy "notifications own" on notifications for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Reports: any signed-in user can file; only admins read/update.
+drop policy if exists "reports insert" on reports;
+create policy "reports insert" on reports for insert with check (auth.uid() = reporter_id);
+drop policy if exists "reports admin" on reports;
+create policy "reports admin" on reports for all
+  using (is_admin(auth.uid())) with check (is_admin(auth.uid()));
+
+-------------------------------------------------------------------------------
+-- Touch trigger for updated_at on profiles & sba_projects
+-------------------------------------------------------------------------------
+create or replace function public.touch_updated_at()
+returns trigger language plpgsql as $$
+begin new.updated_at = now(); return new; end $$;
+
+drop trigger if exists touch_profiles on profiles;
+create trigger touch_profiles before update on profiles
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_sba on sba_projects;
+create trigger touch_sba before update on sba_projects
+  for each row execute function public.touch_updated_at();
