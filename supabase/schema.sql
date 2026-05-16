@@ -159,18 +159,27 @@ create table if not exists profiles (
   updated_at timestamptz not null default now()
 );
 
--- Auto-create a profile when a new auth user signs up.
+-- Auto-create a profile when a new auth user signs up (including anonymous guests).
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer as $$
+declare
+  is_guest boolean := coalesce(new.is_anonymous, false);
+  raw_role text := new.raw_user_meta_data->>'role';
+  default_name text :=
+    coalesce(
+      new.raw_user_meta_data->>'full_name',
+      new.email,
+      case when is_guest then 'Guest Lion' else null end
+    );
 begin
-  insert into public.profiles (id, full_name, role, approved)
+  insert into public.profiles (id, full_name, display_name, role, approved)
   values (
     new.id,
-    coalesce(new.raw_user_meta_data->>'full_name', new.email),
-    coalesce((new.raw_user_meta_data->>'role')::user_role, 'student'),
+    default_name,
+    case when is_guest then 'Guest' else null end,
+    coalesce(raw_role::user_role, 'student'),
     case
-      when coalesce(new.raw_user_meta_data->>'role', 'student') in ('teacher', 'admin')
-      then false
+      when coalesce(raw_role, 'student') in ('teacher', 'admin') then false
       else true
     end
   )
