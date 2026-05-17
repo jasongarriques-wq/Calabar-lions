@@ -4,6 +4,7 @@ import { Navbar } from "@/components/navbar";
 import { ToolComments } from "@/components/tool-comments";
 import { createClient } from "@/lib/supabase/server";
 import { SbaProjectEditor } from "./sba-project-editor";
+import { SbaFiles } from "./sba-files";
 
 type Project = {
   id: string;
@@ -13,6 +14,7 @@ type Project = {
   percent_complete: number | null;
   due_date: string | null;
   notes: string | null;
+  student_id: string;
   document_id: string | null;
   spreadsheet_id: string | null;
   slide_deck_id: string | null;
@@ -33,7 +35,7 @@ export default async function SbaProjectDetailPage({
     supabase
       .from("sba_projects")
       .select(
-        "id, title, subject, status, percent_complete, due_date, notes, document_id, spreadsheet_id, slide_deck_id",
+        "id, title, subject, status, percent_complete, due_date, notes, student_id, document_id, spreadsheet_id, slide_deck_id",
       )
       .eq("id", id)
       .maybeSingle<Project>(),
@@ -46,6 +48,7 @@ export default async function SbaProjectDetailPage({
 
   if (!data) notFound();
   const isStaff = me?.role === "admin" || me?.role === "teacher";
+  const isOwner = data.student_id === user?.id;
 
   return (
     <main>
@@ -55,7 +58,14 @@ export default async function SbaProjectDetailPage({
           ← All SBA projects
         </Link>
         <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_22rem]">
-          <SbaProjectEditor project={data} />
+          <div>
+            <SbaProjectEditor project={data} />
+            <SbaFiles
+              sbaId={data.id}
+              ownerId={data.student_id}
+              canUpload={isOwner || isStaff}
+            />
+          </div>
           <ToolComments
             targetKind="sba"
             targetId={data.id}

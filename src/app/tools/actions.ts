@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { SBA_SUBJECTS_BY_CODE } from "@/lib/sba-subjects";
 
 async function requireUser() {
   const supabase = await createClient();
@@ -74,12 +75,21 @@ export async function deleteSlideDeck(id: string) {
 export async function createSbaProject(formData: FormData) {
   const { supabase, user } = await requireUser();
   const title = String(formData.get("title") ?? "").trim() || "New SBA Project";
-  const subject = String(formData.get("subject") ?? "").trim() || "General";
+  const subjectCode = String(formData.get("subject_code") ?? "").trim();
+  const meta = SBA_SUBJECTS_BY_CODE[subjectCode];
+  const subject = meta?.name ?? "General";
+  const docBody = meta?.template ?? "";
 
   const [{ data: doc }, { data: sheet }, { data: deck }] = await Promise.all([
     supabase
       .from("documents")
-      .insert({ owner_id: user.id, kind: "doc", title: `${title} — Essay`, subject })
+      .insert({
+        owner_id: user.id,
+        kind: "doc",
+        title: `${title} — Essay`,
+        subject,
+        body: docBody,
+      })
       .select("id")
       .single(),
     supabase
@@ -89,7 +99,18 @@ export async function createSbaProject(formData: FormData) {
       .single(),
     supabase
       .from("slide_decks")
-      .insert({ owner_id: user.id, title: `${title} — Slides` })
+      .insert({
+        owner_id: user.id,
+        title: `${title} — Slides`,
+        slides: [
+          { title, body: meta?.sbaType ?? "" },
+          { title: "Introduction", body: "" },
+          { title: "Methodology", body: "" },
+          { title: "Findings", body: "" },
+          { title: "Discussion", body: "" },
+          { title: "Conclusion", body: "" },
+        ],
+      })
       .select("id")
       .single(),
   ]);

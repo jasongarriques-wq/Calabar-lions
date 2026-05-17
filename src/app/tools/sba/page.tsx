@@ -3,6 +3,7 @@ import { FolderKanban } from "lucide-react";
 import { Navbar } from "@/components/navbar";
 import { createClient } from "@/lib/supabase/server";
 import { createSbaProject } from "../actions";
+import { SBA_CATEGORIES } from "@/lib/sba-subjects";
 
 export const metadata = { title: "SBA Workspace" };
 
@@ -33,28 +34,45 @@ export default async function SbaPage() {
     <main>
       <Navbar />
       <section className="mx-auto max-w-5xl px-6 py-10">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <h1 className="font-display text-3xl font-bold tracking-tight">SBA Workspace</h1>
-            <p className="mt-1 text-stone-600">
-              One project, one essay, one sheet, one deck &mdash; all linked.
-            </p>
-          </div>
+        <div>
+          <h1 className="font-display text-3xl font-bold tracking-tight">SBA Workspace</h1>
+          <p className="mt-1 text-stone-600">
+            CSEC and CAPE School-Based Assessments &mdash; essay, data sheet, slide deck, research
+            files, and teacher feedback in one project.
+          </p>
         </div>
 
         <form action={createSbaProject} className="card mt-6">
           <h2 className="text-lg font-semibold text-calabar-green-800">New SBA project</h2>
           <p className="text-sm text-stone-600">
-            Spins up a linked document, spreadsheet, and slide deck in one go.
+            Pick a subject &mdash; we seed the essay with the standard SBA outline and link a
+            data sheet + slides.
           </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
             <div>
-              <label htmlFor="title" className="label">Title</label>
-              <input id="title" name="title" required className="input" placeholder="e.g. Effect of pH on Enzyme Activity" />
+              <label htmlFor="title" className="label">Project title</label>
+              <input
+                id="title"
+                name="title"
+                required
+                className="input"
+                placeholder="e.g. Effect of pH on Catalase Activity"
+              />
             </div>
             <div>
-              <label htmlFor="subject" className="label">Subject</label>
-              <input id="subject" name="subject" required className="input" placeholder="e.g. Biology" />
+              <label htmlFor="subject_code" className="label">Subject</label>
+              <select id="subject_code" name="subject_code" required className="input min-w-64" defaultValue="">
+                <option value="" disabled>Select a subject…</option>
+                {SBA_CATEGORIES.map((group) => (
+                  <optgroup key={group.category} label={group.category}>
+                    {group.subjects.map((s) => (
+                      <option key={s.code} value={s.code}>
+                        {s.name} · {s.track.toUpperCase()}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
             </div>
           </div>
           <div className="mt-4">
