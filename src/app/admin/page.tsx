@@ -1,8 +1,36 @@
 import { redirect } from "next/navigation";
-import { Navbar } from "@/components/navbar";
 import { createClient } from "@/lib/supabase/server";
+import { AdminDashboard, type AdminUser, type AdminReport } from "./admin-dashboard";
 
 export const metadata = { title: "Admin" };
+
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  display_name: string | null;
+  role: string | null;
+  class_group: string | null;
+  grade: number | null;
+  graduating_year: number | null;
+  approved: boolean | null;
+  sport: string | null;
+  houses?: { name: string | null } | { name: string | null }[] | null;
+};
+
+type ReportRow = {
+  id: string;
+  reason: string | null;
+  status: string | null;
+  target_type: string | null;
+  created_at: string;
+};
+
+function severity(reason: string | null): "Low" | "Medium" | "High" {
+  const r = (reason ?? "").toLowerCase();
+  if (r.includes("threat") || r.includes("abuse") || r.includes("violence")) return "High";
+  if (r.includes("spam") || r.includes("duplicate")) return "Low";
+  return "Medium";
+}
 
 export default async function AdminPage() {
   const supabase = await createClient();
@@ -18,84 +46,50 @@ export default async function AdminPage() {
 
   if (me?.role !== "admin") redirect("/dashboard");
 
-  const [{ count: userCount }, { count: reportCount }, { count: pendingMentors }] = await Promise.all([
-    supabase.from("profiles").select("id", { count: "exact", head: true }),
-    supabase.from("reports").select("id", { count: "exact", head: true }).eq("status", "open"),
-    supabase.from("mentors").select("id", { count: "exact", head: true }).eq("approved", false),
+  const [{ data: profiles }, { data: reports }, { count: pending }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select(
+        "id, full_name, display_name, role, class_group, grade, graduating_year, approved, sport, houses ( name )",
+      )
+      .order("created_at", { ascending: false })
+      .limit(40),
+    supabase
+      .from("reports")
+      .select("id, reason, status, target_type, created_at")
+      .eq("status", "open")
+      .order("created_at", { ascending: false })
+      .limit(20),
+    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("approved", false),
   ]);
 
-  const { data: reports } = await supabase
-    .from("reports")
-    .select("id, reason, status, created_at, target_type")
-    .eq("status", "open")
-    .order("created_at", { ascending: false })
-    .limit(20);
+  const users: AdminUser[] = ((profiles as ProfileRow[] | null) ?? []).map((p) => {
+    const houseRel = Array.isArray(p.houses) ? p.houses[0] : p.houses;
+    return {
+      id: p.id,
+      name: p.display_name ?? p.full_name ?? "Unnamed",
+      role: (p.role ?? "student").replace("_", " "),
+      group: p.class_group ?? (p.grade ? `Grade ${p.grade}` : "—"),
+      status: p.approved ? "Active" : "Pending",
+      risk: "Low",
+      email: "—",
+      phone: "—",
+      address: "—",
+      house: houseRel?.name ?? "—",
+      sport: p.sport ?? "—",
+      attendance: "—",
+      graduation: p.graduating_year ? String(p.graduating_year) : "—",
+    };
+  });
+
+  const reportsView: AdminReport[] = ((reports as ReportRow[] | null) ?? []).map((r) => ({
+    id: r.id,
+    title: r.reason ?? "Untitled report",
+    severity: severity(r.reason),
+    area: (r.target_type ?? "general").replace("_", " "),
+  }));
 
   return (
-    <main>
-      <Navbar />
-      <section className="mx-auto max-w-7xl px-6 py-10">
-        <h1 className="font-display text-3xl font-bold tracking-tight">Admin dashboard</h1>
-        <p className="mt-2 text-stone-600">Moderation, approvals, and platform health.</p>
-
-        <div className="mt-8 grid gap-4 sm:grid-cols-3">
-          <Stat label="Total users" value={userCount ?? 0} />
-          <Stat label="Open reports" value={reportCount ?? 0} accent="red" />
-          <Stat label="Pending mentor approvals" value={pendingMentors ?? 0} accent="gold" />
-        </div>
-
-        <div className="mt-8 card">
-          <h2 className="text-lg font-semibold text-calabar-green-800">Open reports</h2>
-          <ul className="mt-4 divide-y divide-stone-200 text-sm">
-            {(reports ?? []).length === 0 && (
-              <li className="py-3 text-stone-500">No open reports — all clear.</li>
-            )}
-            {(reports ?? []).map((r) => {
-              const row = r as unknown as {
-                id: string;
-                reason: string;
-                status: string;
-                created_at: string;
-                target_type: string;
-              };
-              return (
-                <li key={row.id} className="flex flex-wrap justify-between gap-2 py-3">
-                  <div>
-                    <p className="font-medium">{row.reason}</p>
-                    <p className="text-xs text-stone-500">{row.target_type}</p>
-                  </div>
-                  <span className="text-xs text-stone-500">
-                    {new Date(row.created_at).toLocaleString()}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: number;
-  accent?: "red" | "gold";
-}) {
-  const cls =
-    accent === "red"
-      ? "text-red-700"
-      : accent === "gold"
-        ? "text-calabar-gold-700"
-        : "text-calabar-green-700";
-  return (
-    <div className="card">
-      <p className="text-sm text-stone-500">{label}</p>
-      <p className={`mt-2 text-3xl font-bold ${cls}`}>{value.toLocaleString()}</p>
-    </div>
+    <AdminDashboard users={users} reports={reportsView} pendingApprovals={pending ?? 0} />
   );
 }
