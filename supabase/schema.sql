@@ -1207,3 +1207,105 @@ begin
   where role in ('teacher', 'admin') and id <> new.owner_id;
   return new;
 end $$;
+
+-------------------------------------------------------------------------------
+-- Lion Docs: collaboration via document_shares
+-------------------------------------------------------------------------------
+
+create table if not exists document_shares (
+  id uuid primary key default uuid_generate_v4(),
+  document_id uuid not null references documents(id) on delete cascade,
+  shared_with_id uuid not null references profiles(id) on delete cascade,
+  can_edit boolean not null default false,
+  created_at timestamptz not null default now(),
+  unique (document_id, shared_with_id)
+);
+create index if not exists document_shares_user_idx
+  on document_shares (shared_with_id, created_at desc);
+
+alter table document_shares enable row level security;
+
+drop policy if exists "document_shares owner manage" on document_shares;
+create policy "document_shares owner manage" on document_shares for all
+  using (exists (
+    select 1 from documents d where d.id = document_id and d.owner_id = auth.uid()
+  ))
+  with check (exists (
+    select 1 from documents d where d.id = document_id and d.owner_id = auth.uid()
+  ));
+
+drop policy if exists "document_shares read self" on document_shares;
+create policy "document_shares read self" on document_shares for select
+  using (shared_with_id = auth.uid() or is_staff(auth.uid()));
+
+-- Replace the single documents policy with granular ones that respect shares.
+drop policy if exists "documents owner" on documents;
+drop policy if exists "documents select" on documents;
+drop policy if exists "documents insert" on documents;
+drop policy if exists "documents update" on documents;
+drop policy if exists "documents delete" on documents;
+
+create policy "documents select" on documents for select using (
+  auth.uid() = owner_id
+  or is_staff(auth.uid())
+  or is_public
+  or exists (
+    select 1 from document_shares ds
+    where ds.document_id = id and ds.shared_with_id = auth.uid()
+  )
+);
+
+create policy "documents insert" on documents for insert
+  with check (auth.uid() = owner_id);
+
+create policy "documents update" on documents for update
+  using (
+    auth.uid() = owner_id
+    or is_staff(auth.uid())
+    or exists (
+      select 1 from document_shares ds
+      where ds.document_id = id and ds.shared_with_id = auth.uid() and ds.can_edit
+    )
+  )
+  with check (
+    auth.uid() = owner_id
+    or is_staff(auth.uid())
+    or exists (
+      select 1 from document_shares ds
+      where ds.document_id = id and ds.shared_with_id = auth.uid() and ds.can_edit
+    )
+  );
+
+create policy "documents delete" on documents for delete
+  using (auth.uid() = owner_id or is_staff(auth.uid()));
+
+-- Notify the recipient when they're given access to a document.
+create or replace function public.notify_document_share()
+returns trigger language plpgsql security definer as $$
+declare
+  doc_title text;
+  owner_name text;
+begin
+  select d.title, coalesce(p.display_name, p.full_name, 'A classmate')
+    into doc_title, owner_name
+    from documents d
+    join profiles p on p.id = d.owner_id
+   where d.id = new.document_id;
+
+  insert into notifications (user_id, kind, payload)
+  values (
+    new.shared_with_id,
+    'document_share',
+    jsonb_build_object(
+      'title', coalesce(owner_name, 'Someone') || ' shared "' || coalesce(doc_title, 'a document') || '" with you',
+      'body', case when new.can_edit then 'You can edit and comment.' else 'You can read and comment.' end,
+      'href', '/tools/docs/' || new.document_id
+    )
+  );
+  return new;
+end $$;
+
+drop trigger if exists document_share_notify on document_shares;
+create trigger document_share_notify
+  after insert on document_shares
+  for each row execute function public.notify_document_share();
