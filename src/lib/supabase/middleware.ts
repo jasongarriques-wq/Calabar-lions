@@ -49,5 +49,14 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Lion Tools require a real account; bounce guests to sign up.
+  if (path.startsWith("/tools") && user?.is_anonymous) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/signup";
+    url.searchParams.set("reason", "tools");
+    url.searchParams.set("next", path);
+    return NextResponse.redirect(url);
+  }
+
   return response;
 }

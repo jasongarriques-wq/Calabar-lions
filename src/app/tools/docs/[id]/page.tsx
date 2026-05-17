@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import { Navbar } from "@/components/navbar";
 import { ToolComments } from "@/components/tool-comments";
 import { PresenceBar } from "@/components/presence-bar";
-import { GuestUpgradeBanner } from "@/components/guest-upgrade-banner";
 import { createClient } from "@/lib/supabase/server";
 import {
   DocEditor,
@@ -86,11 +85,6 @@ export default async function DocDetailPage({
     <main>
       <Navbar />
       <section className="mx-auto max-w-7xl px-6 py-8">
-        {user?.is_anonymous && (
-          <div className="mb-4 print:hidden">
-            <GuestUpgradeBanner />
-          </div>
-        )}
         <div className="flex items-center justify-between gap-4 print:hidden">
           <Link href="/tools/docs" className="text-sm text-calabar-green-700 hover:underline">
             ← All documents
