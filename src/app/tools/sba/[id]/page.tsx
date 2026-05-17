@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Navbar } from "@/components/navbar";
+import { ToolComments } from "@/components/tool-comments";
 import { createClient } from "@/lib/supabase/server";
 import { SbaProjectEditor } from "./sba-project-editor";
 
@@ -24,23 +25,44 @@ export default async function SbaProjectDetailPage({
 }) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("sba_projects")
-    .select(
-      "id, title, subject, status, percent_complete, due_date, notes, document_id, spreadsheet_id, slide_deck_id",
-    )
-    .eq("id", id)
-    .maybeSingle<Project>();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const [{ data }, { data: me }] = await Promise.all([
+    supabase
+      .from("sba_projects")
+      .select(
+        "id, title, subject, status, percent_complete, due_date, notes, document_id, spreadsheet_id, slide_deck_id",
+      )
+      .eq("id", id)
+      .maybeSingle<Project>(),
+    supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user?.id ?? "")
+      .maybeSingle<{ role: string | null }>(),
+  ]);
+
   if (!data) notFound();
+  const isStaff = me?.role === "admin" || me?.role === "teacher";
 
   return (
     <main>
       <Navbar />
-      <section className="mx-auto max-w-4xl px-6 py-8">
+      <section className="mx-auto max-w-7xl px-6 py-8">
         <Link href="/tools/sba" className="text-sm text-calabar-green-700 hover:underline">
           ← All SBA projects
         </Link>
-        <SbaProjectEditor project={data} />
+        <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_22rem]">
+          <SbaProjectEditor project={data} />
+          <ToolComments
+            targetKind="sba"
+            targetId={data.id}
+            currentUserId={user?.id ?? null}
+            isStaff={isStaff}
+          />
+        </div>
       </section>
     </main>
   );
