@@ -800,3 +800,82 @@ create policy "resources storage staff delete"
   on storage.objects for delete
   using (bucket_id = 'resources' and public.is_staff(auth.uid()));
 
+
+-------------------------------------------------------------------------------
+-- Lion Tools: documents, spreadsheets, slide decks
+-------------------------------------------------------------------------------
+
+create table if not exists documents (
+  id uuid primary key default uuid_generate_v4(),
+  owner_id uuid not null references profiles(id) on delete cascade,
+  kind text not null default 'doc',     -- 'doc' | 'note'
+  title text not null default 'Untitled',
+  body text not null default '',
+  subject text,
+  is_public boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists documents_owner_idx on documents (owner_id, kind, updated_at desc);
+
+create table if not exists spreadsheets (
+  id uuid primary key default uuid_generate_v4(),
+  owner_id uuid not null references profiles(id) on delete cascade,
+  title text not null default 'Untitled',
+  cells jsonb not null default '{}'::jsonb,
+  rows int not null default 20,
+  cols int not null default 10,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists spreadsheets_owner_idx on spreadsheets (owner_id, updated_at desc);
+
+create table if not exists slide_decks (
+  id uuid primary key default uuid_generate_v4(),
+  owner_id uuid not null references profiles(id) on delete cascade,
+  title text not null default 'Untitled',
+  slides jsonb not null default
+    '[{"title":"Welcome","body":"Your first slide. Press Edit to change it."}]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists slide_decks_owner_idx on slide_decks (owner_id, updated_at desc);
+
+-- Link SBA projects to artefacts (additive)
+alter table sba_projects
+  add column if not exists document_id uuid references documents(id) on delete set null,
+  add column if not exists spreadsheet_id uuid references spreadsheets(id) on delete set null,
+  add column if not exists slide_deck_id uuid references slide_decks(id) on delete set null;
+
+-- Touch triggers
+drop trigger if exists touch_documents on documents;
+create trigger touch_documents before update on documents
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_spreadsheets on spreadsheets;
+create trigger touch_spreadsheets before update on spreadsheets
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_slide_decks on slide_decks;
+create trigger touch_slide_decks before update on slide_decks
+  for each row execute function public.touch_updated_at();
+
+-- RLS
+alter table documents enable row level security;
+alter table spreadsheets enable row level security;
+alter table slide_decks enable row level security;
+
+drop policy if exists "documents owner" on documents;
+create policy "documents owner" on documents for all
+  using (auth.uid() = owner_id or is_staff(auth.uid()) or is_public)
+  with check (auth.uid() = owner_id or is_staff(auth.uid()));
+
+drop policy if exists "spreadsheets owner" on spreadsheets;
+create policy "spreadsheets owner" on spreadsheets for all
+  using (auth.uid() = owner_id or is_staff(auth.uid()))
+  with check (auth.uid() = owner_id or is_staff(auth.uid()));
+
+drop policy if exists "slide_decks owner" on slide_decks;
+create policy "slide_decks owner" on slide_decks for all
+  using (auth.uid() = owner_id or is_staff(auth.uid()))
+  with check (auth.uid() = owner_id or is_staff(auth.uid()));
