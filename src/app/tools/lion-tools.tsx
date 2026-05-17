@@ -24,6 +24,9 @@ export function LionToolsGrid() {
         <h1 className="mt-2 font-display text-3xl font-black sm:text-4xl">
           Your Calabar workspace, built in.
         </h1>
+        <p className="mt-3 max-w-2xl italic text-calabar-gold-200">
+          Write like a Lion. Submit with pride.
+        </p>
         <p className="mt-3 max-w-2xl text-stone-200">
           Write essays, build presentations, crunch spreadsheets, capture notes, and run full
           SBA projects &mdash; all signed in with your Calabar Lions account.
