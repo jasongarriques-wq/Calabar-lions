@@ -997,3 +997,86 @@ drop trigger if exists tool_comment_notify on tool_comments;
 create trigger tool_comment_notify
   after insert on tool_comments
   for each row execute function public.notify_tool_comment();
+
+-------------------------------------------------------------------------------
+-- SBA project files (research folder)
+-------------------------------------------------------------------------------
+
+create table if not exists sba_files (
+  id uuid primary key default uuid_generate_v4(),
+  sba_id uuid not null references sba_projects(id) on delete cascade,
+  owner_id uuid not null references profiles(id) on delete cascade,
+  title text not null,
+  storage_path text not null,
+  url text,
+  mime_type text,
+  size_bytes bigint,
+  created_at timestamptz not null default now()
+);
+create index if not exists sba_files_sba_idx on sba_files (sba_id, created_at desc);
+
+alter table sba_files enable row level security;
+
+drop policy if exists "sba_files read" on sba_files;
+create policy "sba_files read" on sba_files for select using (
+  exists (
+    select 1 from sba_projects p
+    where p.id = sba_id and (p.student_id = auth.uid() or is_staff(auth.uid()))
+  )
+);
+
+drop policy if exists "sba_files write" on sba_files;
+create policy "sba_files write" on sba_files for insert with check (
+  owner_id = auth.uid() and exists (
+    select 1 from sba_projects p
+    where p.id = sba_id and p.student_id = auth.uid()
+  )
+);
+
+drop policy if exists "sba_files delete" on sba_files;
+create policy "sba_files delete" on sba_files for delete using (
+  owner_id = auth.uid() or is_staff(auth.uid())
+);
+
+-- Storage bucket for SBA files (private)
+insert into storage.buckets (id, name, public)
+values ('sba-files', 'sba-files', false)
+on conflict (id) do nothing;
+
+drop policy if exists "sba-files storage read" on storage.objects;
+create policy "sba-files storage read"
+  on storage.objects for select
+  using (
+    bucket_id = 'sba-files'
+    and (
+      is_staff(auth.uid())
+      or exists (
+        select 1 from sba_files f
+        join sba_projects p on p.id = f.sba_id
+        where f.storage_path = name and p.student_id = auth.uid()
+      )
+    )
+  );
+
+drop policy if exists "sba-files storage write" on storage.objects;
+create policy "sba-files storage write"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'sba-files'
+    and auth.uid() is not null
+  );
+
+drop policy if exists "sba-files storage delete" on storage.objects;
+create policy "sba-files storage delete"
+  on storage.objects for delete
+  using (
+    bucket_id = 'sba-files'
+    and (
+      is_staff(auth.uid())
+      or exists (
+        select 1 from sba_files f
+        join sba_projects p on p.id = f.sba_id
+        where f.storage_path = name and p.student_id = auth.uid()
+      )
+    )
+  );
