@@ -36,3 +36,28 @@ html {
     @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
   }
 }
+
+@media print {
+  @page {
+    margin: 1in;
+  }
+  body {
+    background: white !important;
+  }
+  header,
+  nav,
+  aside,
+  footer,
+  .print\:hidden {
+    display: none !important;
+  }
+  .doc-print {
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+  .doc-print input {
+    border: 0 !important;
+    padding: 0 !important;
+    font-size: 2rem !important;
+  }
+}
