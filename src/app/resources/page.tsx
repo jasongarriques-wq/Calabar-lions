@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Navbar } from "@/components/navbar";
 import { ResourceCard } from "@/components/resource-card";
+import { ResourceUploadForm } from "./upload-form";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata = { title: "Resource library" };
@@ -12,6 +13,17 @@ export default async function ResourcesPage({
 }) {
   const { subject } = await searchParams;
   const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user?.id ?? "")
+    .maybeSingle<{ role: string | null }>();
+  const isStaff = me?.role === "admin" || me?.role === "teacher";
+
   let query = supabase
     .from("resources")
     .select("id, title, subject, kind, url, created_at")
@@ -32,9 +44,14 @@ export default async function ResourcesPage({
           Past papers, study notes, and uploads from teachers and seniors.
         </p>
 
+        {isStaff && <ResourceUploadForm />}
+
         {subjects.length > 0 && (
           <nav className="mt-6 flex flex-wrap gap-2">
-            <Link href="/resources" className={`pill ${!subject ? "bg-calabar-green-700 text-white" : "bg-stone-100"}`}>
+            <Link
+              href="/resources"
+              className={`pill ${!subject ? "bg-calabar-green-700 text-white" : "bg-stone-100"}`}
+            >
               All
             </Link>
             {subjects.map((s) => (

@@ -763,3 +763,40 @@ begin
     on conflict do nothing;
   end loop;
 end $$;
+
+-------------------------------------------------------------------------------
+-- Storage: resources bucket + access policies
+-------------------------------------------------------------------------------
+
+-- Public read bucket. RLS still controls who can write.
+insert into storage.buckets (id, name, public)
+values ('resources', 'resources', true)
+on conflict (id) do nothing;
+
+-- Anyone signed in can read object metadata for the resources bucket.
+drop policy if exists "resources storage read" on storage.objects;
+create policy "resources storage read"
+  on storage.objects for select
+  using (bucket_id = 'resources' and auth.uid() is not null);
+
+-- Staff (teachers/admins) can upload to the resources bucket.
+drop policy if exists "resources storage staff write" on storage.objects;
+create policy "resources storage staff write"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'resources'
+    and public.is_staff(auth.uid())
+  );
+
+-- Staff can replace/delete their own (or any) uploads.
+drop policy if exists "resources storage staff update" on storage.objects;
+create policy "resources storage staff update"
+  on storage.objects for update
+  using (bucket_id = 'resources' and public.is_staff(auth.uid()))
+  with check (bucket_id = 'resources' and public.is_staff(auth.uid()));
+
+drop policy if exists "resources storage staff delete" on storage.objects;
+create policy "resources storage staff delete"
+  on storage.objects for delete
+  using (bucket_id = 'resources' and public.is_staff(auth.uid()));
+
