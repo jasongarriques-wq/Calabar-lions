@@ -30,10 +30,16 @@ export default function RootError({
         <button type="button" onClick={reset} className="btn-primary">
           Try again
         </button>
+        <a href="/api/health" target="_blank" rel="noreferrer" className="btn-secondary">
+          Run diagnostics
+        </a>
         <Link href="/" className="btn-secondary">
           Home
         </Link>
       </div>
+      <p className="mt-3 text-xs text-stone-500">
+        Diagnostics check env vars and required tables. The JSON tells you exactly what to fix.
+      </p>
     </main>
   );
 }

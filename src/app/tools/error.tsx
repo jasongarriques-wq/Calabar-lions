@@ -46,10 +46,16 @@ export default function ToolsError({
         <button type="button" onClick={reset} className="btn-primary">
           Try again
         </button>
+        <a href="/api/health" target="_blank" rel="noreferrer" className="btn-secondary">
+          Run diagnostics
+        </a>
         <Link href="/dashboard" className="btn-secondary">
           Back to dashboard
         </Link>
       </div>
+      <p className="mt-3 text-xs text-stone-500">
+        Diagnostics check env vars and tables. If something fails, the JSON tells you exactly what to fix.
+      </p>
     </main>
   );
 }
