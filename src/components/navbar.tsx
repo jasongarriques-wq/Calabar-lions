@@ -7,6 +7,7 @@ const links = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/houses", label: "Houses" },
   { href: "/groups", label: "Groups" },
+  { href: "/tools", label: "Lion Tools" },
   { href: "/sba", label: "SBA" },
   { href: "/resources", label: "Resources" },
   { href: "/mentorship", label: "Mentorship" },

@@ -11,6 +11,7 @@ const PROTECTED_PREFIXES = [
   "/mentorship",
   "/admin",
   "/notifications",
+  "/tools",
 ];
 
 export async function updateSession(request: NextRequest) {
