@@ -86,6 +86,8 @@ export default async function DashboardPage() {
         </h1>
         <p className="mt-2 text-stone-600">Your day at a glance.</p>
 
+        <QuickLinks />
+
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           <CalabarStudentCard profile={profile} email={user?.email ?? null} subjects={subjects} />
 
@@ -133,5 +135,28 @@ export default async function DashboardPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+function QuickLinks() {
+  const items = [
+    { href: "/tools", label: "Lion Tools", desc: "Docs, Sheets, Slides, Notes" },
+    { href: "/tools/sba", label: "SBA Workspace", desc: "Run your School-Based Assessment" },
+    { href: "/groups", label: "Groups", desc: "Class, sports, clubs, houses" },
+    { href: "/resources", label: "Resources", desc: "Past papers and notes" },
+  ];
+  return (
+    <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {items.map((it) => (
+        <a
+          key={it.href}
+          href={it.href}
+          className="card transition hover:border-calabar-green-300 hover:shadow-md"
+        >
+          <p className="font-semibold text-calabar-green-800">{it.label}</p>
+          <p className="mt-1 text-xs text-stone-600">{it.desc}</p>
+        </a>
+      ))}
+    </div>
   );
 }
