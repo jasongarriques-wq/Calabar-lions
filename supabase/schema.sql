@@ -1164,3 +1164,46 @@ drop trigger if exists doc_submission_notify on documents;
 create trigger doc_submission_notify
   after update of status on documents
   for each row execute function public.notify_doc_submission();
+
+-- Guests (anonymous users) shouldn't trigger a school-wide submission ping.
+create or replace function public.notify_doc_submission()
+returns trigger language plpgsql security definer as $$
+declare
+  student_name text;
+  is_guest boolean;
+begin
+  if new.status <> 'submitted' or coalesce(old.status, 'draft') = 'submitted' then
+    return new;
+  end if;
+
+  select coalesce(au.is_anonymous, false), coalesce(p.display_name, p.full_name, 'A student')
+    into is_guest, student_name
+    from auth.users au
+    join profiles p on p.id = au.id
+   where au.id = new.owner_id;
+
+  if coalesce(is_guest, false) then
+    -- Notify only the author themselves that guest submissions don't reach teachers.
+    insert into notifications (user_id, kind, payload)
+    values (
+      new.owner_id,
+      'doc_submission_guest',
+      jsonb_build_object(
+        'title', 'Guest submissions don''t reach a teacher',
+        'body', 'Claim your account with an email to send "' || new.title || '" for review.',
+        'href', '/tools/docs/' || new.id
+      )
+    );
+    return new;
+  end if;
+
+  insert into notifications (user_id, kind, payload)
+  select id, 'doc_submission',
+    jsonb_build_object(
+      'title', coalesce(student_name, 'Student') || ' submitted "' || new.title || '" for review',
+      'href', '/tools/docs/' || new.id
+    )
+  from profiles
+  where role in ('teacher', 'admin') and id <> new.owner_id;
+  return new;
+end $$;
