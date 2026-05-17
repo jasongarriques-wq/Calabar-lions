@@ -940,3 +940,60 @@ create policy "tool_comments update" on tool_comments for update
 drop policy if exists "tool_comments delete" on tool_comments;
 create policy "tool_comments delete" on tool_comments for delete
   using (author_id = auth.uid() or is_staff(auth.uid()));
+
+-------------------------------------------------------------------------------
+-- Notifications: ping artefact owner when someone else comments
+-------------------------------------------------------------------------------
+
+create or replace function public.notify_tool_comment()
+returns trigger language plpgsql security definer as $$
+declare
+  owner uuid;
+  artefact_title text;
+  href text;
+  author_name text;
+begin
+  -- Find the owner + title for the target.
+  if new.target_kind = 'doc' then
+    select owner_id, title into owner, artefact_title
+      from documents where id = new.target_id;
+    href := '/tools/docs/' || new.target_id;
+  elsif new.target_kind = 'sheet' then
+    select owner_id, title into owner, artefact_title
+      from spreadsheets where id = new.target_id;
+    href := '/tools/sheets/' || new.target_id;
+  elsif new.target_kind = 'slides' then
+    select owner_id, title into owner, artefact_title
+      from slide_decks where id = new.target_id;
+    href := '/tools/slides/' || new.target_id;
+  elsif new.target_kind = 'sba' then
+    select student_id, title into owner, artefact_title
+      from sba_projects where id = new.target_id;
+    href := '/tools/sba/' || new.target_id;
+  end if;
+
+  -- Don't notify the author about their own comment.
+  if owner is null or owner = new.author_id then return new; end if;
+
+  select coalesce(display_name, full_name, 'Someone')
+    into author_name
+    from profiles where id = new.author_id;
+
+  insert into notifications (user_id, kind, payload)
+  values (
+    owner,
+    'tool_comment',
+    jsonb_build_object(
+      'title', coalesce(author_name, 'Someone') || ' commented on ' || coalesce(artefact_title, 'your work'),
+      'body', left(new.body, 200),
+      'href', href
+    )
+  );
+
+  return new;
+end $$;
+
+drop trigger if exists tool_comment_notify on tool_comments;
+create trigger tool_comment_notify
+  after insert on tool_comments
+  for each row execute function public.notify_tool_comment();
