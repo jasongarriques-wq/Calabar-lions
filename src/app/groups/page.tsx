@@ -25,6 +25,7 @@ export default async function GroupsPage({
   let query = supabase
     .from("groups")
     .select("id, name, type, description, member_count:group_members(count)")
+    .is("parent_id", null)
     .order("name");
   if (type) query = query.eq("type", type);
   const { data: groups } = await query;

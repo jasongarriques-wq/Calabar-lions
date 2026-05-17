@@ -171,8 +171,15 @@ declare
       new.email,
       case when is_guest then 'Guest Lion' else null end
     );
+  grade_in int := nullif(new.raw_user_meta_data->>'grade', '')::int;
+  form_in text := new.raw_user_meta_data->>'form';
+  class_in text := nullif(new.raw_user_meta_data->>'class_group', '');
+  grad_year int := nullif(new.raw_user_meta_data->>'graduating_year', '')::int;
 begin
-  insert into public.profiles (id, full_name, display_name, role, approved)
+  insert into public.profiles (
+    id, full_name, display_name, role, approved,
+    grade, form, class_group, graduating_year
+  )
   values (
     new.id,
     default_name,
@@ -181,7 +188,11 @@ begin
     case
       when coalesce(raw_role, 'student') in ('teacher', 'admin') then false
       else true
-    end
+    end,
+    grade_in,
+    coalesce(form_in, public.form_name(grade_in)),
+    class_in,
+    grad_year
   )
   on conflict (id) do nothing;
   return new;
@@ -601,3 +612,154 @@ create trigger touch_profiles before update on profiles
 drop trigger if exists touch_sba on sba_projects;
 create trigger touch_sba before update on sba_projects
   for each row execute function public.touch_updated_at();
+
+-------------------------------------------------------------------------------
+-- Calabar grade / form / class structure + sports tree
+-- (additive; re-runnable)
+-------------------------------------------------------------------------------
+
+-- Profile identity columns
+alter table profiles
+  add column if not exists grade int,
+  add column if not exists graduating_year int,
+  add column if not exists sport text,
+  add column if not exists club text;
+
+-- Group hierarchy (channels live under their parent class/sport)
+alter table groups
+  add column if not exists parent_id uuid references groups(id) on delete cascade,
+  add column if not exists slug text;
+
+create index if not exists groups_parent_idx on groups (parent_id);
+create unique index if not exists groups_slug_uniq on groups (school_id, slug) where slug is not null;
+
+-- Helper to compute form name from grade
+create or replace function public.form_name(g int)
+returns text language sql immutable as $$
+  select case g
+    when 7 then 'First Form'
+    when 8 then 'Second Form'
+    when 9 then 'Third Form'
+    when 10 then 'Fourth Form'
+    when 11 then 'Fifth Form'
+    when 12 then 'Lower Sixth'
+    when 13 then 'Upper Sixth'
+    else null
+  end;
+$$;
+
+-- Seed 40 main classes (Grades 7–11, streams 1–8) and their groups + channels.
+do $$
+declare
+  school_uuid uuid := '00000000-0000-0000-0000-000000000001';
+  g int;
+  s int;
+  class_name text;
+  cls_id uuid;
+  group_id uuid;
+  channel_name text;
+  channels text[] := array[
+    'General Chat', 'Homework', 'Timetable', 'Announcements',
+    'Memes', 'Sports', 'Attendance', 'Study Sessions',
+    'Exam Prep', 'Class Media'
+  ];
+begin
+  for g in 7..11 loop
+    for s in 1..8 loop
+      class_name := g || '-' || s;
+
+      -- canonical class row
+      insert into classes (school_id, name, form)
+      values (school_uuid, class_name, public.form_name(g))
+      on conflict do nothing
+      returning id into cls_id;
+
+      if cls_id is null then
+        select id into cls_id from classes
+         where school_id = school_uuid and name = class_name limit 1;
+      end if;
+
+      -- the social group for the class
+      insert into groups (school_id, type, name, description, slug, ref_id, approved)
+      values (
+        school_uuid, 'class', class_name,
+        public.form_name(g) || ' · ' || class_name,
+        'class-' || class_name, cls_id, true
+      )
+      on conflict do nothing;
+
+      select id into group_id from groups
+       where school_id = school_uuid and slug = 'class-' || class_name limit 1;
+
+      -- channels under the class group
+      foreach channel_name in array channels loop
+        insert into groups (school_id, type, name, slug, parent_id, approved)
+        values (
+          school_uuid, 'class', channel_name,
+          'class-' || class_name || '-' ||
+            lower(replace(channel_name, ' ', '-')),
+          group_id, true
+        )
+        on conflict do nothing;
+      end loop;
+    end loop;
+  end loop;
+end $$;
+
+-- Sixth-form streams (Lower & Upper). Each is a top-level "class" group.
+insert into groups (school_id, type, name, description, slug, approved) values
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Lower Sixth · Science', 'L6 Science stream', 'l6-science', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Lower Sixth · Business', 'L6 Business stream', 'l6-business', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Lower Sixth · Humanities', 'L6 Humanities stream', 'l6-humanities', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Lower Sixth · Engineering', 'L6 Engineering stream', 'l6-engineering', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Lower Sixth · CAPE Unit 1', 'CAPE Unit 1 cohort', 'l6-cape-unit-1', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Lower Sixth · SAT Prep', 'SAT preparation', 'l6-sat-prep', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Lower Sixth · Scholarships', 'Scholarship hunters', 'l6-scholarships', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Lower Sixth · University Prep', 'University preparation', 'l6-uni-prep', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Upper Sixth · CAPE Unit 2', 'CAPE Unit 2 cohort', 'u6-cape-unit-2', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Upper Sixth · Graduation', 'Class graduating soon', 'u6-graduation', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Upper Sixth · University Applications', 'UCAS / Common App / regional', 'u6-uni-apps', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Upper Sixth · Career Planning', 'Careers and internships', 'u6-careers', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Upper Sixth · Entrepreneurship', 'Founders and side hustles', 'u6-entrepreneurship', true),
+  ('00000000-0000-0000-0000-000000000001', 'class', 'Upper Sixth · Alumni Transition', 'Stepping into Old Boys life', 'u6-alumni-transition', true)
+on conflict do nothing;
+
+-- Sports hub + main sports
+insert into groups (school_id, type, name, description, slug, approved) values
+  ('00000000-0000-0000-0000-000000000001', 'sport', 'Track & Field', 'Champs and beyond', 'sport-track-and-field', true),
+  ('00000000-0000-0000-0000-000000000001', 'sport', 'Football', 'Manning Cup, daCosta Cup', 'sport-football', true),
+  ('00000000-0000-0000-0000-000000000001', 'sport', 'Cricket', 'Cricket squad', 'sport-cricket', true),
+  ('00000000-0000-0000-0000-000000000001', 'sport', 'Basketball', 'Basketball squad', 'sport-basketball', true),
+  ('00000000-0000-0000-0000-000000000001', 'sport', 'Rugby', 'Rugby squad', 'sport-rugby', true),
+  ('00000000-0000-0000-0000-000000000001', 'sport', 'Swimming', 'Aquatics', 'sport-swimming', true),
+  ('00000000-0000-0000-0000-000000000001', 'sport', 'Table Tennis', 'Table tennis', 'sport-table-tennis', true),
+  ('00000000-0000-0000-0000-000000000001', 'sport', 'Chess', 'Chess club', 'sport-chess', true),
+  ('00000000-0000-0000-0000-000000000001', 'sport', 'Fitness Club', 'Strength and conditioning', 'sport-fitness', true)
+on conflict do nothing;
+
+-- Track & Field sub-teams (parent = the Track & Field hub group).
+do $$
+declare
+  parent_uuid uuid;
+  school_uuid uuid := '00000000-0000-0000-0000-000000000001';
+  sub text;
+  subs text[] := array[
+    'Sprinters', 'Relay Teams', 'Hurdlers', 'Long Jump', 'High Jump',
+    'Throwers', 'Middle Distance', 'Long Distance', 'Strength Training',
+    'Coaches', 'Records', 'Champs Preparation'
+  ];
+begin
+  select id into parent_uuid from groups
+   where school_id = school_uuid and slug = 'sport-track-and-field' limit 1;
+  if parent_uuid is null then return; end if;
+
+  foreach sub in array subs loop
+    insert into groups (school_id, type, name, slug, parent_id, approved)
+    values (
+      school_uuid, 'sport', sub,
+      'tf-' || lower(replace(replace(sub, ' ', '-'), '&', 'and')),
+      parent_uuid, true
+    )
+    on conflict do nothing;
+  end loop;
+end $$;

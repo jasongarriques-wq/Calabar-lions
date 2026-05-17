@@ -13,9 +13,13 @@ type Profile = {
   display_name: string | null;
   role: string | null;
   form: string | null;
+  grade: number | null;
   class_group: string | null;
   academic_year: string | null;
+  graduating_year: number | null;
   track: string | null;
+  sport: string | null;
+  club: string | null;
   house_id: string | null;
   houses?: { id: string; name: string; color: string | null } | null;
 };
@@ -29,7 +33,7 @@ export default async function DashboardPage() {
   const { data: profile } = await supabase
     .from("profiles")
     .select(
-      "id, full_name, display_name, role, form, class_group, academic_year, track, house_id, houses ( id, name, color )",
+      "id, full_name, display_name, role, form, grade, class_group, academic_year, graduating_year, track, sport, club, house_id, houses ( id, name, color )",
     )
     .eq("id", user?.id ?? "")
     .maybeSingle<Profile>();
