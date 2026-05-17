@@ -48,23 +48,35 @@ export type DocVersion = {
   created_at: string;
 };
 
+export type DocAuthorMeta = {
+  name: string;
+  form: string | null;
+  classGroup: string | null;
+  subject: string | null;
+  academicYear: string | null;
+  graduatingYear: number | null;
+};
+
 type Props = {
   id: string;
   initialTitle: string;
   initialBody: string;
   initialCitations: DocCitation[];
   initialStatus: "draft" | "submitted" | "reviewed";
+  initialSubject: string;
   linkedSpreadsheetId: string | null;
   linkedSlideDeckId: string | null;
   spreadsheets: Spreadsheet[];
   slideDecks: SlideDeck[];
   initialVersions: DocVersion[];
+  author: DocAuthorMeta;
   canEdit: boolean;
 };
 
 export function DocEditor(props: Props) {
   const [title, setTitle] = useState(props.initialTitle);
   const [body, setBody] = useState(props.initialBody);
+  const [subject, setSubject] = useState(props.initialSubject);
   const [citations, setCitations] = useState<DocCitation[]>(props.initialCitations);
   const [status, setStatus] = useState(props.initialStatus);
   const [sheetId, setSheetId] = useState<string | null>(props.linkedSpreadsheetId);
@@ -102,7 +114,7 @@ export function DocEditor(props: Props) {
   }, [editor]);
 
   const { status: saveStatus, error } = useAutosave(
-    { title, body, citations, sheetId, deckId },
+    { title, body, subject, citations, sheetId, deckId },
     async (v) => {
       const supabase = createClient();
       const { error } = await supabase
@@ -110,6 +122,7 @@ export function DocEditor(props: Props) {
         .update({
           title: v.title,
           body: v.body,
+          subject: v.subject || null,
           citations: v.citations,
           linked_spreadsheet_id: v.sheetId,
           linked_slide_deck_id: v.deckId,
@@ -123,6 +136,7 @@ export function DocEditor(props: Props) {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
       <article className="doc-print">
+        <AuthorHeader author={props.author} subject={subject} />
         <div className="flex items-center justify-between gap-3">
           <input
             value={title}
@@ -147,6 +161,8 @@ export function DocEditor(props: Props) {
         id={props.id}
         title={title}
         body={body}
+        subject={subject}
+        setSubject={setSubject}
         editor={editor}
         citations={citations}
         setCitations={setCitations}
@@ -167,6 +183,40 @@ export function DocEditor(props: Props) {
         setVersions={setVersions}
         canEdit={props.canEdit}
       />
+    </div>
+  );
+}
+
+function AuthorHeader({
+  author,
+  subject,
+}: {
+  author: DocAuthorMeta;
+  subject: string;
+}) {
+  const initials = author.name
+    .split(" ")
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  return (
+    <div className="mb-6 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 print:border-0 print:bg-transparent print:px-0">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="grid h-10 w-10 place-items-center rounded-full bg-calabar-green-700 text-sm font-bold text-white">
+          {initials}
+        </div>
+        <div className="flex-1 text-xs text-stone-600">
+          <p className="text-sm font-semibold text-stone-900">{author.name}</p>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            {author.classGroup && <span>Class {author.classGroup}</span>}
+            {author.form && <span>· Form {author.form}</span>}
+            {subject && <span>· {subject}</span>}
+            {author.academicYear && <span>· {author.academicYear}</span>}
+            {author.graduatingYear && <span>· Grad {author.graduatingYear}</span>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -267,6 +317,8 @@ type PanelProps = {
   id: string;
   title: string;
   body: string;
+  subject: string;
+  setSubject: (s: string) => void;
   editor: Editor | null;
   citations: DocCitation[];
   setCitations: React.Dispatch<React.SetStateAction<DocCitation[]>>;
@@ -289,6 +341,7 @@ function DocSidePanel(p: PanelProps) {
     <aside className="space-y-4 print:hidden">
       <TemplateSection {...p} />
       <OutlineSection body={p.body} />
+      <SbaCheckerSection {...p} />
       <StatsSection body={p.body} />
       <CitationsSection {...p} />
       <AttachSection {...p} />
@@ -318,7 +371,7 @@ function PanelCard({
   );
 }
 
-function TemplateSection({ setBody, canEdit }: PanelProps) {
+function TemplateSection({ setBody, setSubject, canEdit }: PanelProps) {
   const [code, setCode] = useState("");
   const subject = code ? SBA_SUBJECTS_BY_CODE[code] : undefined;
 
@@ -326,6 +379,7 @@ function TemplateSection({ setBody, canEdit }: PanelProps) {
     if (!subject?.template) return;
     if (!confirm(`Replace document body with the ${subject.name} SBA template?`)) return;
     setBody(subject.template);
+    setSubject(subject.name);
   }
 
   return (
@@ -403,7 +457,7 @@ function OutlineSection({ body }: { body: string }) {
 function StatsSection({ body }: { body: string }) {
   const stats = useMemo(() => computeStats(body), [body]);
   return (
-    <PanelCard icon={Sparkles} title="Writing assistant">
+    <PanelCard icon={Sparkles} title="Smart school assistant">
       <dl className="space-y-1 text-xs">
         <Row k="Words" v={stats.words} />
         <Row k="Characters" v={stats.chars} />
@@ -419,6 +473,9 @@ function StatsSection({ body }: { body: string }) {
           ))}
         </ul>
       )}
+      <p className="mt-3 border-t border-stone-100 pt-2 text-[10px] uppercase tracking-wider text-stone-400">
+        AI-powered grammar &amp; suggestions coming soon.
+      </p>
     </PanelCard>
   );
 }
@@ -601,7 +658,7 @@ function VersionsSection(p: PanelProps) {
   );
 }
 
-function ActionsSection({ id, status, setStatus, canEdit }: PanelProps) {
+function ActionsSection({ id, title, body, citations, status, setStatus, canEdit }: PanelProps) {
   const [pending, setPending] = useState(false);
 
   async function submit() {
@@ -624,6 +681,32 @@ function ActionsSection({ id, status, setStatus, canEdit }: PanelProps) {
     if (typeof window !== "undefined") window.print();
   }, []);
 
+  const exportDoc = useCallback(() => {
+    const safeTitle = (title || "document").replace(/[^\w\-]+/g, "_");
+    const refsHtml =
+      citations.length > 0
+        ? `<h2>Bibliography</h2><ol>${citations
+            .map(
+              (c) =>
+                `<li><strong>${escapeHtml(c.title)}</strong>${
+                  c.source ? ` — ${escapeHtml(c.source)}` : ""
+                }${c.url ? ` — ${escapeHtml(c.url)}` : ""}</li>`,
+            )
+            .join("")}</ol>`
+        : "";
+    const html =
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>` +
+      `<style>body{font-family:Calibri,Arial,sans-serif;line-height:1.5;margin:1in;}h1{font-size:24pt;}h2{font-size:18pt;}p{margin:8pt 0;}</style>` +
+      `</head><body><h1>${escapeHtml(title)}</h1>${body}${refsHtml}</body></html>`;
+    const blob = new Blob(["﻿", html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${safeTitle}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [title, body, citations]);
+
   return (
     <PanelCard icon={ClipboardList} title="Actions">
       <button
@@ -633,6 +716,14 @@ function ActionsSection({ id, status, setStatus, canEdit }: PanelProps) {
       >
         <Download className="h-3.5 w-3.5" />
         Export PDF
+      </button>
+      <button
+        type="button"
+        onClick={exportDoc}
+        className="btn-secondary mt-2 w-full justify-center text-xs"
+      >
+        <Download className="h-3.5 w-3.5" />
+        Export Word (.doc)
       </button>
       <button
         type="button"
@@ -649,6 +740,112 @@ function ActionsSection({ id, status, setStatus, canEdit }: PanelProps) {
       </button>
     </PanelCard>
   );
+}
+
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function SbaCheckerSection({ body, citations, status }: PanelProps) {
+  const checks = useMemo(() => buildSbaChecks(body, citations.length, status), [
+    body,
+    citations.length,
+    status,
+  ]);
+  const done = checks.filter((c) => c.ok).length;
+  return (
+    <PanelCard icon={ListChecks} title="SBA checker">
+      <div className="mb-3 h-2 overflow-hidden rounded-full bg-stone-100">
+        <div
+          className={`h-full transition-all ${
+            done === checks.length ? "bg-calabar-green-600" : "bg-calabar-gold-500"
+          }`}
+          style={{ width: `${(done / checks.length) * 100}%` }}
+        />
+      </div>
+      <ul className="space-y-1.5 text-xs">
+        {checks.map((c) => (
+          <li key={c.label} className="flex items-start gap-2">
+            <span
+              className={`mt-0.5 grid h-4 w-4 flex-none place-items-center rounded-full text-[10px] font-bold ${
+                c.ok ? "bg-calabar-green-600 text-white" : "bg-stone-200 text-stone-600"
+              }`}
+            >
+              {c.ok ? "✓" : "·"}
+            </span>
+            <span className={c.ok ? "text-stone-700" : "text-stone-500"}>
+              <span className="font-medium">{c.label}</span>
+              {!c.ok && c.hint && <span className="ml-1 text-stone-400">— {c.hint}</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-xs text-stone-500">
+        {done} of {checks.length} checks passed
+      </p>
+    </PanelCard>
+  );
+}
+
+function buildSbaChecks(body: string, citationCount: number, status: string) {
+  const plain = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const words = plain ? plain.split(" ").length : 0;
+  const headings = Array.from(body.matchAll(/<h2[^>]*>(.*?)<\/h2>/gi)).map((m) =>
+    m[1].toLowerCase(),
+  );
+  const has = (needles: string[]) =>
+    headings.some((h) => needles.some((n) => h.includes(n)));
+  return [
+    {
+      label: "Cover page (title set)",
+      ok: words > 0,
+      hint: "Give the document a clear title.",
+    },
+    {
+      label: "Table of contents (≥3 H2 sections)",
+      ok: headings.length >= 3,
+      hint: "Add at least three Heading 2 sections.",
+    },
+    {
+      label: "Introduction / Aim",
+      ok: has(["introduction", "aim", "problem", "purpose", "background"]),
+      hint: "Add an Introduction or Aim section.",
+    },
+    {
+      label: "Methodology",
+      ok: has(["method", "procedure", "design", "approach"]),
+      hint: "Add a Methodology section.",
+    },
+    {
+      label: "Analysis / Findings",
+      ok: has(["analysis", "findings", "results", "data", "discussion"]),
+      hint: "Add an Analysis or Findings section.",
+    },
+    {
+      label: "Conclusion",
+      ok: has(["conclusion", "recommendations"]),
+      hint: "Add a Conclusion.",
+    },
+    {
+      label: "Bibliography",
+      ok: citationCount > 0 || has(["bibliography", "references"]),
+      hint: "Use Insert citation or add a Bibliography heading.",
+    },
+    {
+      label: "Word count (≥ 800)",
+      ok: words >= 800,
+      hint: `Currently ${words} words.`,
+    },
+    {
+      label: "Submitted for review",
+      ok: status !== "draft",
+      hint: "Hit Submit when ready.",
+    },
+  ];
 }
 
 // -- Helpers --
@@ -688,5 +885,13 @@ function computeStats(body: string) {
     tips.push("Break the text into multiple paragraphs.");
   if (/\bthing\b/i.test(plain))
     tips.push("Replace ‘thing’ with a more specific noun.");
+  if (/\b(can't|won't|don't|it's|I'm|you're|they're|we're)\b/.test(plain))
+    tips.push("Avoid contractions in formal writing — expand them (e.g. ‘do not’).");
+  if (/\bvery\b/i.test(plain))
+    tips.push("‘Very’ rarely adds meaning. Pick a sharper word.");
+  if (words > 100 && !/\b(however|therefore|because|moreover|in addition|consequently)\b/i.test(plain))
+    tips.push("Add transition words (however, therefore, because) to connect ideas.");
+  if (/(I think|I believe|in my opinion)/i.test(plain) && words > 300)
+    tips.push("In academic essays, state claims directly rather than ‘I think’.");
   return { words, chars, sentences, paragraphs, avgWordsPerSentence, readingMinutes, tips };
 }

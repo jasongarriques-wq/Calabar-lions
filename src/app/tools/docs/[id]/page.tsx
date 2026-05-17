@@ -10,6 +10,7 @@ import {
   type DocVersion,
   type Spreadsheet,
   type SlideDeck,
+  type DocAuthorMeta,
 } from "./doc-editor";
 
 type Doc = {
@@ -18,10 +19,20 @@ type Doc = {
   body: string;
   kind: string;
   owner_id: string;
+  subject: string | null;
   citations: DocCitation[] | null;
   status: "draft" | "submitted" | "reviewed" | null;
   linked_spreadsheet_id: string | null;
   linked_slide_deck_id: string | null;
+};
+
+type OwnerProfile = {
+  display_name: string | null;
+  full_name: string | null;
+  form: string | null;
+  class_group: string | null;
+  academic_year: string | null;
+  graduating_year: number | null;
 };
 
 export default async function DocDetailPage({
@@ -39,7 +50,7 @@ export default async function DocDetailPage({
     supabase
       .from("documents")
       .select(
-        "id, title, body, kind, owner_id, citations, status, linked_spreadsheet_id, linked_slide_deck_id",
+        "id, title, body, kind, owner_id, subject, citations, status, linked_spreadsheet_id, linked_slide_deck_id",
       )
       .eq("id", id)
       .eq("kind", "doc")
@@ -60,26 +71,43 @@ export default async function DocDetailPage({
   const isOwner = data.owner_id === user?.id;
   const canEdit = isOwner || isStaff;
 
-  const [{ data: sheets }, { data: decks }, { data: versions }] = await Promise.all([
-    supabase
-      .from("spreadsheets")
-      .select("id, title")
-      .eq("owner_id", data.owner_id)
-      .order("updated_at", { ascending: false })
-      .limit(50),
-    supabase
-      .from("slide_decks")
-      .select("id, title")
-      .eq("owner_id", data.owner_id)
-      .order("updated_at", { ascending: false })
-      .limit(50),
-    supabase
-      .from("document_versions")
-      .select("id, title, body, note, created_at")
-      .eq("document_id", id)
-      .order("created_at", { ascending: false })
-      .limit(50),
-  ]);
+  const [{ data: sheets }, { data: decks }, { data: versions }, { data: owner }] =
+    await Promise.all([
+      supabase
+        .from("spreadsheets")
+        .select("id, title")
+        .eq("owner_id", data.owner_id)
+        .order("updated_at", { ascending: false })
+        .limit(50),
+      supabase
+        .from("slide_decks")
+        .select("id, title")
+        .eq("owner_id", data.owner_id)
+        .order("updated_at", { ascending: false })
+        .limit(50),
+      supabase
+        .from("document_versions")
+        .select("id, title, body, note, created_at")
+        .eq("document_id", id)
+        .order("created_at", { ascending: false })
+        .limit(50),
+      supabase
+        .from("profiles")
+        .select(
+          "display_name, full_name, form, class_group, academic_year, graduating_year",
+        )
+        .eq("id", data.owner_id)
+        .maybeSingle<OwnerProfile>(),
+    ]);
+
+  const author: DocAuthorMeta = {
+    name: owner?.display_name ?? owner?.full_name ?? "Calabar Lion",
+    form: owner?.form ?? null,
+    classGroup: owner?.class_group ?? null,
+    subject: data.subject ?? null,
+    academicYear: owner?.academic_year ?? null,
+    graduatingYear: owner?.graduating_year ?? null,
+  };
 
   return (
     <main>
@@ -103,11 +131,13 @@ export default async function DocDetailPage({
             initialBody={data.body}
             initialCitations={(data.citations ?? []) as DocCitation[]}
             initialStatus={(data.status ?? "draft") as "draft" | "submitted" | "reviewed"}
+            initialSubject={data.subject ?? ""}
             linkedSpreadsheetId={data.linked_spreadsheet_id}
             linkedSlideDeckId={data.linked_slide_deck_id}
             spreadsheets={(sheets as Spreadsheet[] | null) ?? []}
             slideDecks={(decks as SlideDeck[] | null) ?? []}
             initialVersions={(versions as DocVersion[] | null) ?? []}
+            author={author}
             canEdit={canEdit}
           />
           <div className="print:hidden">
