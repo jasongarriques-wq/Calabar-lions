@@ -1305,3 +1305,109 @@ drop trigger if exists document_share_notify on document_shares;
 create trigger document_share_notify
   after insert on document_shares
   for each row execute function public.notify_document_share();
+
+-------------------------------------------------------------------------------
+-- Break RLS recursion between documents and document_shares
+-- SECURITY DEFINER functions bypass RLS for the cross-table lookup.
+-------------------------------------------------------------------------------
+
+create or replace function public.is_document_owner(doc_id uuid, uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (select 1 from documents where id = doc_id and owner_id = uid);
+$$;
+
+create or replace function public.is_document_shared_with(doc_id uuid, uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (
+    select 1 from document_shares
+    where document_id = doc_id and shared_with_id = uid
+  );
+$$;
+
+create or replace function public.user_can_edit_document(doc_id uuid, uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (
+    select 1 from document_shares
+    where document_id = doc_id and shared_with_id = uid and can_edit
+  );
+$$;
+
+-- Replace recursive policies on documents.
+drop policy if exists "documents select" on documents;
+create policy "documents select" on documents for select using (
+  auth.uid() = owner_id
+  or is_staff(auth.uid())
+  or is_public
+  or public.is_document_shared_with(id, auth.uid())
+);
+
+drop policy if exists "documents update" on documents;
+create policy "documents update" on documents for update
+  using (
+    auth.uid() = owner_id
+    or is_staff(auth.uid())
+    or public.user_can_edit_document(id, auth.uid())
+  )
+  with check (
+    auth.uid() = owner_id
+    or is_staff(auth.uid())
+    or public.user_can_edit_document(id, auth.uid())
+  );
+
+-- Replace recursive policy on document_shares.
+drop policy if exists "document_shares owner manage" on document_shares;
+create policy "document_shares owner manage" on document_shares for all
+  using (public.is_document_owner(document_id, auth.uid()))
+  with check (public.is_document_owner(document_id, auth.uid()));
+
+-- Tool comments referenced documents directly — convert to the helper too
+-- so a sharer with read access can also see comments on the doc.
+drop policy if exists "tool_comments read" on tool_comments;
+create policy "tool_comments read" on tool_comments for select using (
+  auth.uid() is not null and (
+    is_staff(auth.uid())
+    or (target_kind = 'doc' and (
+      public.is_document_owner(target_id, auth.uid())
+      or public.is_document_shared_with(target_id, auth.uid())
+    ))
+    or (target_kind = 'sheet' and exists (
+         select 1 from spreadsheets s where s.id = target_id and s.owner_id = auth.uid()))
+    or (target_kind = 'slides' and exists (
+         select 1 from slide_decks sd where sd.id = target_id and sd.owner_id = auth.uid()))
+    or (target_kind = 'sba' and exists (
+         select 1 from sba_projects p where p.id = target_id and p.student_id = auth.uid()))
+  )
+);
+
+drop policy if exists "tool_comments insert" on tool_comments;
+create policy "tool_comments insert" on tool_comments for insert with check (
+  author_id = auth.uid() and (
+    is_staff(auth.uid())
+    or (target_kind = 'doc' and (
+      public.is_document_owner(target_id, auth.uid())
+      or public.is_document_shared_with(target_id, auth.uid())
+    ))
+    or (target_kind = 'sheet' and exists (
+         select 1 from spreadsheets s where s.id = target_id and s.owner_id = auth.uid()))
+    or (target_kind = 'slides' and exists (
+         select 1 from slide_decks sd where sd.id = target_id and sd.owner_id = auth.uid()))
+    or (target_kind = 'sba' and exists (
+         select 1 from sba_projects p where p.id = target_id and p.student_id = auth.uid()))
+  )
+);
+
+-- document_versions referenced documents via subquery — same fix.
+drop policy if exists "document_versions read" on document_versions;
+create policy "document_versions read" on document_versions for select using (
+  public.is_document_owner(document_id, auth.uid()) or is_staff(auth.uid())
+);
+
+drop policy if exists "document_versions write" on document_versions;
+create policy "document_versions write" on document_versions for insert with check (
+  public.is_document_owner(document_id, auth.uid()) or is_staff(auth.uid())
+);
+
+drop policy if exists "document_versions delete" on document_versions;
+create policy "document_versions delete" on document_versions for delete using (
+  public.is_document_owner(document_id, auth.uid())
+);
