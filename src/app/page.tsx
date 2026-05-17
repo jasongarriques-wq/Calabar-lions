@@ -49,7 +49,34 @@ export default function Home() {
         </div>
       </section>
 
-      <footer className="bg-calabar-green-900 text-stone-200">
+      <section className="bg-calabar-green-900 text-white">
+        <div className="mx-auto max-w-6xl px-6 py-16 sm:py-20">
+          <p className="text-xs font-bold uppercase tracking-[0.3em] text-calabar-gold-300">
+            Lion Tools
+          </p>
+          <h2 className="mt-2 font-display text-3xl font-bold tracking-tight sm:text-4xl">
+            Your Calabar workspace, built in.
+          </h2>
+          <p className="mt-3 max-w-2xl text-stone-200">
+            Lion Docs, Sheets, Slides, Notes, and a full SBA workspace — signed in with your
+            Calabar account.
+          </p>
+          <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <ToolTile name="Lion Docs" desc="Essays & reports" />
+            <ToolTile name="Lion Sheets" desc="Data & gradebooks" />
+            <ToolTile name="Lion Slides" desc="Presentations" />
+            <ToolTile name="Lion Notes" desc="Class notes" />
+            <ToolTile name="SBA Workspace" desc="Full project hub" />
+          </div>
+          <div className="mt-8">
+            <Link href="/tools" className="btn-gold">
+              Open Lion Tools
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <footer className="bg-calabar-ink text-stone-300">
         <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-4 px-6 py-10 sm:flex-row sm:items-center">
           <p className="text-sm">
             &copy; {new Date().getFullYear()} Calabar Lions. The Utmost for the Highest.
@@ -66,6 +93,15 @@ function Feature({ title, body }: { title: string; body: string }) {
     <div className="card">
       <h3 className="text-lg font-semibold text-calabar-green-800">{title}</h3>
       <p className="mt-2 text-sm text-stone-600">{body}</p>
+    </div>
+  );
+}
+
+function ToolTile({ name, desc }: { name: string; desc: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+      <p className="font-semibold">{name}</p>
+      <p className="mt-1 text-xs text-stone-300">{desc}</p>
     </div>
   );
 }
