@@ -3,9 +3,13 @@ type Profile = {
   display_name: string | null;
   role: string | null;
   form: string | null;
+  grade: number | null;
   class_group: string | null;
   academic_year: string | null;
+  graduating_year: number | null;
   track: string | null;
+  sport: string | null;
+  club: string | null;
   houses?: { name: string; color: string | null } | null;
 };
 
@@ -42,15 +46,9 @@ export function CalabarStudentCard({
           <p className="truncate text-xs text-stone-500">{email}</p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {profile?.houses && (
-              <span
-                className="pill text-white"
-                style={{ background: houseColor }}
-              >
+              <span className="pill text-white" style={{ background: houseColor }}>
                 {profile.houses.name}
               </span>
-            )}
-            {profile?.form && (
-              <span className="pill bg-stone-100 text-stone-700">Form {profile.form}</span>
             )}
             {profile?.class_group && (
               <span className="pill bg-stone-100 text-stone-700">{profile.class_group}</span>
@@ -65,8 +63,17 @@ export function CalabarStudentCard({
       </div>
 
       <dl className="mt-5 space-y-1 text-sm">
-        <Row label="Academic year" value={profile?.academic_year ?? "—"} />
-        <Row label="Role" value={profile?.role ?? "Student"} />
+        <Row label="Grade" value={profile?.grade ? String(profile.grade) : "—"} />
+        <Row label="Form" value={profile?.form ?? "—"} />
+        <Row label="Class" value={profile?.class_group ?? "—"} />
+        <Row label="House" value={profile?.houses?.name ?? "—"} />
+        <Row label="Sport" value={profile?.sport ?? "—"} />
+        <Row label="Club" value={profile?.club ?? "—"} />
+        <Row label="Role" value={(profile?.role ?? "student").replace("_", " ")} />
+        <Row
+          label="Graduating year"
+          value={profile?.graduating_year ? String(profile.graduating_year) : "—"}
+        />
       </dl>
 
       <div className="mt-5">
@@ -96,7 +103,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between">
       <dt className="text-stone-500">{label}</dt>
-      <dd className="font-medium">{value}</dd>
+      <dd className="font-medium capitalize">{value}</dd>
     </div>
   );
 }
