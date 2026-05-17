@@ -4,6 +4,7 @@ import { Navbar } from "@/components/navbar";
 import { ToolComments } from "@/components/tool-comments";
 import { PresenceBar } from "@/components/presence-bar";
 import { createClient } from "@/lib/supabase/server";
+import { DocSharePanel } from "./doc-share-panel";
 import {
   DocEditor,
   type DocCitation,
@@ -140,7 +141,13 @@ export default async function DocDetailPage({
             author={author}
             canEdit={canEdit}
           />
-          <div className="print:hidden">
+          <div className="space-y-4 print:hidden">
+            <DocSharePanel
+              documentId={data.id}
+              ownerId={data.owner_id}
+              currentUserId={user?.id ?? null}
+              canManage={isOwner || isStaff}
+            />
             <ToolComments
               targetKind="doc"
               targetId={data.id}
