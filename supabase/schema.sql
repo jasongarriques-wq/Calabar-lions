@@ -879,3 +879,64 @@ drop policy if exists "slide_decks owner" on slide_decks;
 create policy "slide_decks owner" on slide_decks for all
   using (auth.uid() = owner_id or is_staff(auth.uid()))
   with check (auth.uid() = owner_id or is_staff(auth.uid()));
+
+-------------------------------------------------------------------------------
+-- Tool comments (teacher review on docs / sheets / slides / sba)
+-------------------------------------------------------------------------------
+
+create table if not exists tool_comments (
+  id uuid primary key default uuid_generate_v4(),
+  target_kind text not null check (target_kind in ('doc', 'sheet', 'slides', 'sba')),
+  target_id uuid not null,
+  author_id uuid not null references profiles(id) on delete cascade,
+  body text not null check (length(body) between 1 and 5000),
+  resolved boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists tool_comments_target_idx
+  on tool_comments (target_kind, target_id, created_at desc);
+
+alter table tool_comments enable row level security;
+
+-- Read: must have read access to the underlying artefact.
+drop policy if exists "tool_comments read" on tool_comments;
+create policy "tool_comments read" on tool_comments for select using (
+  auth.uid() is not null and (
+    is_staff(auth.uid())
+    or (target_kind = 'doc' and exists (
+         select 1 from documents d where d.id = target_id and d.owner_id = auth.uid()))
+    or (target_kind = 'sheet' and exists (
+         select 1 from spreadsheets s where s.id = target_id and s.owner_id = auth.uid()))
+    or (target_kind = 'slides' and exists (
+         select 1 from slide_decks sd where sd.id = target_id and sd.owner_id = auth.uid()))
+    or (target_kind = 'sba' and exists (
+         select 1 from sba_projects p where p.id = target_id and p.student_id = auth.uid()))
+  )
+);
+
+-- Insert: author must be themselves; must have read access (same rule).
+drop policy if exists "tool_comments insert" on tool_comments;
+create policy "tool_comments insert" on tool_comments for insert with check (
+  author_id = auth.uid() and (
+    is_staff(auth.uid())
+    or (target_kind = 'doc' and exists (
+         select 1 from documents d where d.id = target_id and d.owner_id = auth.uid()))
+    or (target_kind = 'sheet' and exists (
+         select 1 from spreadsheets s where s.id = target_id and s.owner_id = auth.uid()))
+    or (target_kind = 'slides' and exists (
+         select 1 from slide_decks sd where sd.id = target_id and sd.owner_id = auth.uid()))
+    or (target_kind = 'sba' and exists (
+         select 1 from sba_projects p where p.id = target_id and p.student_id = auth.uid()))
+  )
+);
+
+-- Update: author can edit own; staff can resolve any.
+drop policy if exists "tool_comments update" on tool_comments;
+create policy "tool_comments update" on tool_comments for update
+  using (author_id = auth.uid() or is_staff(auth.uid()))
+  with check (author_id = auth.uid() or is_staff(auth.uid()));
+
+-- Delete: author or staff.
+drop policy if exists "tool_comments delete" on tool_comments;
+create policy "tool_comments delete" on tool_comments for delete
+  using (author_id = auth.uid() or is_staff(auth.uid()));
