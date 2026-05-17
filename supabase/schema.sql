@@ -1080,3 +1080,87 @@ create policy "sba-files storage delete"
       )
     )
   );
+
+-------------------------------------------------------------------------------
+-- Lion Docs: linked artefacts, submission state, citations, versions
+-------------------------------------------------------------------------------
+
+alter table documents
+  add column if not exists linked_spreadsheet_id uuid references spreadsheets(id) on delete set null,
+  add column if not exists linked_slide_deck_id uuid references slide_decks(id) on delete set null,
+  add column if not exists status text not null default 'draft',
+  add column if not exists submitted_at timestamptz,
+  add column if not exists citations jsonb not null default '[]'::jsonb;
+
+do $$ begin
+  alter table documents
+    add constraint documents_status_check check (status in ('draft', 'submitted', 'reviewed'));
+exception when duplicate_object then null; end $$;
+
+create table if not exists document_versions (
+  id uuid primary key default uuid_generate_v4(),
+  document_id uuid not null references documents(id) on delete cascade,
+  title text not null,
+  body text not null,
+  saved_by uuid references profiles(id) on delete set null,
+  note text,
+  created_at timestamptz not null default now()
+);
+create index if not exists document_versions_doc_idx
+  on document_versions (document_id, created_at desc);
+
+alter table document_versions enable row level security;
+
+drop policy if exists "document_versions read" on document_versions;
+create policy "document_versions read" on document_versions for select using (
+  exists (
+    select 1 from documents d
+    where d.id = document_id
+      and (d.owner_id = auth.uid() or is_staff(auth.uid()))
+  )
+);
+
+drop policy if exists "document_versions write" on document_versions;
+create policy "document_versions write" on document_versions for insert with check (
+  exists (
+    select 1 from documents d
+    where d.id = document_id
+      and (d.owner_id = auth.uid() or is_staff(auth.uid()))
+  )
+);
+
+drop policy if exists "document_versions delete" on document_versions;
+create policy "document_versions delete" on document_versions for delete using (
+  exists (
+    select 1 from documents d
+    where d.id = document_id and d.owner_id = auth.uid()
+  )
+);
+
+-- Notify staff (form teachers / admins of the school) when a doc is submitted.
+create or replace function public.notify_doc_submission()
+returns trigger language plpgsql security definer as $$
+declare
+  student_name text;
+begin
+  if new.status <> 'submitted' or coalesce(old.status, 'draft') = 'submitted' then
+    return new;
+  end if;
+  select coalesce(display_name, full_name, 'A student')
+    into student_name from profiles where id = new.owner_id;
+
+  insert into notifications (user_id, kind, payload)
+  select id, 'doc_submission',
+    jsonb_build_object(
+      'title', coalesce(student_name, 'Student') || ' submitted "' || new.title || '" for review',
+      'href', '/tools/docs/' || new.id
+    )
+  from profiles
+  where role in ('teacher', 'admin') and id <> new.owner_id;
+  return new;
+end $$;
+
+drop trigger if exists doc_submission_notify on documents;
+create trigger doc_submission_notify
+  after update of status on documents
+  for each row execute function public.notify_doc_submission();
