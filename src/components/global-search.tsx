@@ -131,7 +131,7 @@ export function GlobalSearch() {
               {results.groups.map((g) => (
                 <Link
                   key={g.id}
-                  href="/groups"
+                  href={`/groups/${g.id}`}
                   onClick={() => setOpen(false)}
                   className="block px-4 py-2 text-sm hover:bg-stone-50"
                 >

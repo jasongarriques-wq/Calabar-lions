@@ -71,14 +71,18 @@ export default async function GroupsPage({
             };
             const count = row.member_count?.[0]?.count ?? 0;
             return (
-              <div key={row.id} className="card">
+              <Link
+                key={row.id}
+                href={`/groups/${row.id}`}
+                className="card transition hover:border-calabar-green-300 hover:shadow-md"
+              >
                 <span className="pill bg-calabar-gold-100 text-calabar-gold-800">{row.type}</span>
                 <h3 className="mt-2 font-semibold">{row.name}</h3>
                 {row.description && (
                   <p className="mt-1 line-clamp-2 text-sm text-stone-600">{row.description}</p>
                 )}
                 <p className="mt-3 text-xs text-stone-500">{count} members</p>
-              </div>
+              </Link>
             );
           })}
         </div>
