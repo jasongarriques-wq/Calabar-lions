@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAutosave } from "@/lib/use-autosave";
 import { SaveStatusPill } from "@/components/save-status";
+import { RichTextEditor } from "@/components/rich-text-editor";
 
 export function DocEditor({
   id,
@@ -29,7 +30,8 @@ export function DocEditor({
     },
   );
 
-  const wordCount = body.trim() ? body.trim().split(/\s+/).length : 0;
+  const plain = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const wordCount = plain ? plain.split(" ").length : 0;
 
   return (
     <div className="mt-4">
@@ -45,15 +47,16 @@ export function DocEditor({
       <div className="mt-2 flex items-center gap-3 text-xs text-stone-500">
         <span>{wordCount} words</span>
         <span>·</span>
-        <span>{body.length} characters</span>
+        <span>{plain.length} characters</span>
       </div>
-      <textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        placeholder="Start writing your document…"
-        rows={28}
-        className="mt-6 w-full resize-y bg-transparent text-base leading-relaxed focus:outline-none"
-      />
+
+      <div className="mt-6">
+        <RichTextEditor
+          value={body}
+          onChange={setBody}
+          placeholder="Start writing your document…"
+        />
+      </div>
     </div>
   );
 }
