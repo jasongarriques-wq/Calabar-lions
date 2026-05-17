@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { GlobalSearch } from "@/components/global-search";
+import { NotificationBell } from "@/components/notification-bell";
 
 const links = [
   { href: "/dashboard", label: "Dashboard" },
@@ -18,15 +20,16 @@ export async function Navbar() {
 
   return (
     <header className="border-b border-stone-200 bg-white">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-6 py-3">
         <Link href="/" className="flex items-center gap-2 font-semibold">
           <span className="grid h-9 w-9 place-items-center rounded-full bg-calabar-green-700 text-calabar-gold-400">
             CL
           </span>
           <span className="text-lg tracking-tight">Calabar Lions</span>
         </Link>
+
         {user && (
-          <nav className="hidden gap-5 text-sm text-stone-600 md:flex">
+          <nav className="order-3 hidden gap-5 text-sm text-stone-600 md:order-none md:flex">
             {links.map((l) => (
               <Link key={l.href} href={l.href} className="hover:text-calabar-green-800">
                 {l.label}
@@ -34,7 +37,16 @@ export async function Navbar() {
             ))}
           </nav>
         )}
-        <div className="flex items-center gap-2">
+
+        <div className="flex flex-1 items-center justify-end gap-2 md:flex-none">
+          {user && (
+            <>
+              <div className="hidden flex-1 sm:block">
+                <GlobalSearch />
+              </div>
+              <NotificationBell />
+            </>
+          )}
           {user ? (
             <form action="/auth/logout" method="post">
               <button type="submit" className="btn-secondary">
