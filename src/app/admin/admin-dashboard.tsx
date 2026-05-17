@@ -117,6 +117,37 @@ const signInRoles = [
   { role: "Old Boy", access: "Alumni network, mentorship, donations", defaultGroup: "Class of 2012" },
 ];
 
+const productivityApps = [
+  {
+    name: "Lion Docs",
+    type: "Essay & Document Editor",
+    description:
+      "Write essays, SBA reports, assignments, and collaborative documents.",
+    features: ["Live collaboration", "Teacher comments", "Auto-save", "Templates", "Grammar tools"],
+  },
+  {
+    name: "Lion Slides",
+    type: "Presentation Builder",
+    description:
+      "Create SBA presentations, class presentations, and pitch decks.",
+    features: ["Animations", "Group editing", "Presenter mode", "Export PDF", "Media embeds"],
+  },
+  {
+    name: "Lion Sheets",
+    type: "Spreadsheet System",
+    description:
+      "Perform calculations, charts, data analysis, and financial work.",
+    features: ["Formulas", "Charts", "Attendance tracking", "Budget sheets", "Gradebooks"],
+  },
+  {
+    name: "Lion Notes",
+    type: "Digital Notebook",
+    description:
+      "Store class notes, diagrams, formulas, and revision materials.",
+    features: ["Draw mode", "Subject tabs", "Cloud sync", "Voice notes", "Study folders"],
+  },
+];
+
 function StatCard({
   title,
   value,
@@ -390,6 +421,120 @@ export function AdminDashboard({ users, reports, pendingApprovals }: Props) {
             </div>
           </section>
 
+          <section className="mt-6">
+            <Card className="overflow-hidden rounded-2xl border-slate-200 shadow-sm">
+              <div className="bg-gradient-to-r from-slate-950 to-slate-800 p-6 text-white">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.3em] text-emerald-300">
+                      Calabar Productivity Suite
+                    </p>
+                    <h3 className="mt-2 text-3xl font-black">
+                      Built-In 365 Style Student Workspace
+                    </h3>
+                    <p className="mt-3 max-w-3xl text-slate-300">
+                      Students can write essays, build presentations, create spreadsheets,
+                      collaborate live, and complete SBA projects directly inside the Calabar
+                      Lions ecosystem.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Pill>SBA Ready</Pill>
+                    <Pill>Cloud Collaboration</Pill>
+                    <Pill>Teacher Review</Pill>
+                    <Pill>Auto Save</Pill>
+                  </div>
+                </div>
+              </div>
+
+              <CardContent className="p-6">
+                <div className="grid grid-cols-1 gap-5 xl:grid-cols-2 2xl:grid-cols-4">
+                  {productivityApps.map((app) => (
+                    <motion.div
+                      key={app.name}
+                      whileHover={{ y: -4 }}
+                      className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h4 className="text-2xl font-black text-slate-950">{app.name}</h4>
+                          <p className="mt-1 text-xs font-bold uppercase tracking-wider text-emerald-600">
+                            {app.type}
+                          </p>
+                        </div>
+
+                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100">
+                          <BookOpen className="h-6 w-6 text-slate-700" />
+                        </div>
+                      </div>
+
+                      <p className="mt-4 text-sm leading-relaxed text-slate-600">
+                        {app.description}
+                      </p>
+
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        {app.features.map((feature) => (
+                          <span
+                            key={feature}
+                            className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
+                          >
+                            {feature}
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="mt-6 grid grid-cols-2 gap-2">
+                        <Button className="rounded-2xl bg-slate-950 text-xs hover:bg-slate-800">
+                          Open App
+                        </Button>
+                        <Button variant="outline" className="rounded-2xl text-xs">
+                          Create File
+                        </Button>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+
+                <div className="mt-8 rounded-3xl border border-slate-200 bg-slate-50 p-6">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <h4 className="text-2xl font-black">SBA Workspace System</h4>
+                      <p className="mt-2 max-w-3xl text-slate-600">
+                        Students can create full School Based Assessments with teacher review,
+                        live collaboration, grading workflows, version history, research folders,
+                        presentation exports, and spreadsheet calculations.
+                      </p>
+                    </div>
+
+                    <Button className="rounded-2xl bg-emerald-600 px-6 py-6 text-base font-bold text-white hover:bg-emerald-700">
+                      Create New SBA Project
+                    </Button>
+                  </div>
+
+                  <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <SbaFeature
+                      title="Essay Writing"
+                      body="Introduction, methodology, analysis, conclusion, bibliography."
+                    />
+                    <SbaFeature
+                      title="Spreadsheet Analysis"
+                      body="Charts, formulas, financial analysis, survey calculations."
+                    />
+                    <SbaFeature
+                      title="Presentation Builder"
+                      body="Final oral presentations with slides and media support."
+                    />
+                    <SbaFeature
+                      title="Teacher Review"
+                      body="Comments, grading, approvals, and revision tracking."
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
           <section className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
             <Card className="rounded-2xl border-slate-200 shadow-sm">
               <CardContent className="p-5">
@@ -650,6 +795,15 @@ export function AdminDashboard({ users, reports, pendingApprovals }: Props) {
           )}
         </main>
       </div>
+    </div>
+  );
+}
+
+function SbaFeature({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <h5 className="font-bold">{title}</h5>
+      <p className="mt-2 text-sm text-slate-500">{body}</p>
     </div>
   );
 }
