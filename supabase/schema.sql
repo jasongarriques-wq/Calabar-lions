@@ -141,11 +141,7 @@ create table if not exists profiles (
   display_name text,
   student_id text,                       -- optional
   date_of_birth date,
-  is_minor boolean generated always as (
-    case when date_of_birth is null then true
-         else (current_date - date_of_birth) < interval '18 years'
-    end
-  ) stored,
+  -- is_minor was a generated column; compute in the app from date_of_birth.
   form text,                             -- "1".."6L".."6U"
   class_id uuid references classes(id) on delete set null,
   class_group text,                      -- denormalized name e.g. "4A"
