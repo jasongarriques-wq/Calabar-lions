@@ -11,6 +11,26 @@ async function requireUser() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  // Self-heal: ensure a profile exists for this auth user before any FK insert.
+  // Required for accounts created before the handle_new_user trigger existed
+  // or when the trigger failed silently.
+  await supabase
+    .from("profiles")
+    .upsert(
+      {
+        id: user.id,
+        full_name:
+          (user.user_metadata?.full_name as string | undefined) ??
+          user.email ??
+          (user.is_anonymous ? "Guest Lion" : null),
+        display_name: user.is_anonymous ? "Guest" : null,
+        role:
+          (user.user_metadata?.role as string | undefined) ?? "student",
+      },
+      { onConflict: "id", ignoreDuplicates: true },
+    );
+
   return { supabase, user };
 }
 
