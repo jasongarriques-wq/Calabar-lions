@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import { GlobalSearch } from "@/components/global-search";
 import { NotificationBell } from "@/components/notification-bell";
@@ -30,8 +31,14 @@ export async function Navbar() {
         <div className="flex items-center gap-2">
           {user && <NavbarMobileMenu links={links} />}
           <Link href="/" className="flex items-center gap-2 font-semibold">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-calabar-green-700 text-calabar-gold-400">
-              CL
+            <span className="relative h-9 w-9 overflow-hidden rounded-lg bg-calabar-ink">
+              <Image
+                src="/lion-shield.png"
+                alt=""
+                fill
+                sizes="36px"
+                className="object-contain p-0.5"
+              />
             </span>
             <span className="text-lg tracking-tight">Calabar Lions</span>
           </Link>
