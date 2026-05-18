@@ -1,9 +1,19 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Navbar } from "@/components/navbar";
-import { ToolComments } from "@/components/tool-comments";
 import { createClient } from "@/lib/supabase/server";
 import { SlideEditor, type Slide } from "./slide-editor";
+
+type Deck = {
+  id: string;
+  title: string;
+  slides: Slide[];
+};
+
+type OwnerProfile = {
+  display_name: string | null;
+  full_name: string | null;
+  form: string | null;
+  class_group: string | null;
+};
 
 export default async function SlideDeckDetailPage({
   params,
@@ -11,48 +21,48 @@ export default async function SlideDeckDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const [{ data }, { data: me }] = await Promise.all([
-    supabase
-      .from("slide_decks")
-      .select("id, title, slides")
-      .eq("id", id)
-      .maybeSingle<{ id: string; title: string; slides: Slide[] }>(),
-    supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user?.id ?? "")
-      .maybeSingle<{ role: string | null }>(),
-  ]);
+  let data: Deck | null = null;
+  let owner: OwnerProfile | null = null;
+  let canEdit = false;
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const [docRes, profileRes] = await Promise.all([
+      supabase
+        .from("slide_decks")
+        .select("id, title, slides, owner_id")
+        .eq("id", id)
+        .maybeSingle<Deck & { owner_id: string }>(),
+      supabase
+        .from("profiles")
+        .select("display_name, full_name, form, class_group")
+        .eq("id", user?.id ?? "")
+        .maybeSingle<OwnerProfile>(),
+    ]);
+    if (docRes.error) console.error("[slide detail] doc", docRes.error);
+    if (profileRes.error) console.error("[slide detail] profile", profileRes.error);
+    data = docRes.data ?? null;
+    owner = profileRes.data ?? null;
+    canEdit = !!user && docRes.data?.owner_id === user.id;
+  } catch (e) {
+    console.error("[slide detail] fatal", e);
+  }
 
   if (!data) notFound();
-  const isStaff = me?.role === "admin" || me?.role === "teacher";
 
   return (
-    <main>
-      <Navbar />
-      <section className="mx-auto max-w-7xl px-6 py-6">
-        <Link href="/tools/slides" className="text-sm text-calabar-green-700 hover:underline">
-          ← All decks
-        </Link>
-        <div className="mt-4 grid gap-6 xl:grid-cols-[1fr_22rem]">
-          <SlideEditor
-            id={data.id}
-            initialTitle={data.title}
-            initialSlides={Array.isArray(data.slides) ? data.slides : []}
-          />
-          <ToolComments
-            targetKind="slides"
-            targetId={data.id}
-            currentUserId={user?.id ?? null}
-            isStaff={isStaff}
-          />
-        </div>
-      </section>
-    </main>
+    <SlideEditor
+      id={data.id}
+      initialTitle={data.title}
+      initialSlides={Array.isArray(data.slides) ? data.slides : []}
+      author={{
+        name: owner?.display_name ?? owner?.full_name ?? "Calabar Lion",
+        form: owner?.form ?? null,
+        classGroup: owner?.class_group ?? null,
+      }}
+      canEdit={canEdit}
+    />
   );
 }

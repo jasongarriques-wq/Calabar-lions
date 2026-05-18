@@ -1,37 +1,60 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Play, ChevronLeft, ChevronRight, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Play,
+  Plus,
+  Presentation,
+  Trash2,
+  X,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useAutosave } from "@/lib/use-autosave";
-import { SaveStatusPill } from "@/components/save-status";
+import {
+  ToolShell,
+  RibbonGroup,
+  type ToolShellAuthor,
+} from "@/components/tool-shell";
 
 export type Slide = { title: string; body: string };
+
+const TABS = ["File", "Home", "Insert", "Design", "Transitions", "View", "Help"];
 
 export function SlideEditor({
   id,
   initialTitle,
   initialSlides,
+  author,
+  canEdit,
 }: {
   id: string;
   initialTitle: string;
   initialSlides: Slide[];
+  author: ToolShellAuthor;
+  canEdit: boolean;
 }) {
   const [title, setTitle] = useState(initialTitle);
   const [slides, setSlides] = useState<Slide[]>(
     initialSlides.length ? initialSlides : [{ title: "Welcome", body: "" }],
   );
   const [active, setActive] = useState(0);
+  const [tab, setTab] = useState("Home");
   const [presenting, setPresenting] = useState(false);
 
-  const { status, error } = useAutosave({ title, slides }, async (v) => {
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("slide_decks")
-      .update({ title: v.title, slides: v.slides })
-      .eq("id", id);
-    if (error) throw new Error(error.message);
-  });
+  const { status } = useAutosave(
+    { title, slides },
+    async (v) => {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("slide_decks")
+        .update({ title: v.title, slides: v.slides })
+        .eq("id", id);
+      if (error) throw new Error(error.message);
+    },
+    { enabled: canEdit },
+  );
 
   function update(i: number, patch: Partial<Slide>) {
     setSlides((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
@@ -47,95 +70,117 @@ export function SlideEditor({
   }
 
   return (
-    <div className="mt-4">
-      <div className="flex items-center justify-between gap-3">
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Deck title"
-          className="w-full bg-transparent text-2xl font-bold focus:outline-none"
-        />
-        <div className="flex items-center gap-2">
-          <SaveStatusPill status={status} error={error} />
-          <button onClick={() => setPresenting(true)} className="btn-primary text-sm">
-            <Play className="h-4 w-4" />
-            Present
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-6 grid gap-4 md:grid-cols-[14rem_1fr]">
-        <ol className="space-y-2">
-          {slides.map((s, i) => (
-            <li key={i}>
-              <button
-                onClick={() => setActive(i)}
-                className={`flex w-full items-start gap-2 rounded-xl border p-2 text-left text-sm transition ${
-                  i === active
-                    ? "border-calabar-green-500 bg-calabar-green-50"
-                    : "border-stone-200 bg-white hover:border-stone-300"
-                }`}
-              >
-                <span className="grid h-5 w-5 flex-none place-items-center rounded-full bg-stone-100 text-xs font-semibold">
-                  {i + 1}
-                </span>
-                <span className="line-clamp-2 flex-1 font-medium">
-                  {s.title || "Untitled slide"}
-                </span>
-                {slides.length > 1 && (
-                  <span
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeSlide(i);
-                    }}
-                    className="text-stone-400 hover:text-red-700"
-                    role="button"
-                    aria-label="Delete slide"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
-          <li>
+    <ToolShell
+      appName="Lion Slides"
+      appTagline="Present like a Lion."
+      badge="Deck"
+      title={title}
+      setTitle={canEdit ? setTitle : undefined}
+      saveStatus={status}
+      author={author}
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={setTab}
+      canEdit={canEdit}
+      statusItems={
+        <>
+          <span>
+            Slide {active + 1} of {slides.length}
+          </span>
+        </>
+      }
+      rightActions={
+        <button
+          type="button"
+          onClick={() => setPresenting(true)}
+          className="inline-flex items-center gap-1.5 rounded-md bg-calabar-green-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-calabar-green-800"
+        >
+          <Play className="h-3.5 w-3.5" />
+          Present
+        </button>
+      }
+      toolbar={
+        <>
+          <RibbonGroup label="Slides">
             <button
               onClick={addSlide}
-              className="flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-stone-300 p-2 text-sm text-stone-600 hover:border-calabar-green-400 hover:text-calabar-green-700"
+              disabled={!canEdit}
+              className="inline-flex items-center gap-1 rounded bg-calabar-green-700 px-2 py-1 text-xs font-semibold text-white hover:bg-calabar-green-800 disabled:opacity-50"
             >
-              <Plus className="h-4 w-4" />
-              Add slide
+              <Plus className="h-3 w-3" /> New slide
             </button>
-          </li>
-        </ol>
-
-        <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+            <button
+              onClick={() => removeSlide(active)}
+              disabled={!canEdit || slides.length <= 1}
+              className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-slate-50 disabled:opacity-50"
+            >
+              <Trash2 className="h-3 w-3" /> Delete
+            </button>
+          </RibbonGroup>
+        </>
+      }
+      leftPanel={
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
+            <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Slides
+            </h2>
+            <Presentation className="h-4 w-4 text-slate-400" />
+          </div>
+          <ol className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+            {slides.map((s, i) => (
+              <li key={i}>
+                <button
+                  onClick={() => setActive(i)}
+                  className={`flex w-full items-start gap-2 rounded-lg border p-2 text-left text-xs transition ${
+                    i === active
+                      ? "border-calabar-green-500 bg-calabar-green-50"
+                      : "border-slate-200 bg-white hover:border-slate-300"
+                  }`}
+                >
+                  <span className="grid h-5 w-5 flex-none place-items-center rounded-full bg-slate-100 text-[10px] font-bold">
+                    {i + 1}
+                  </span>
+                  <span className="line-clamp-2 flex-1 font-medium">
+                    {s.title || "Untitled slide"}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        </div>
+      }
+    >
+      <div className="grid h-full min-h-0 place-items-center bg-[#c9cfdb] p-6">
+        <div
+          className="aspect-[16/9] w-full rounded-md bg-white p-12 shadow-[0_6px_30px_rgba(15,23,42,0.18)] ring-1 ring-slate-300"
+          style={{ maxWidth: 1100 }}
+        >
           <input
             value={slides[active]?.title ?? ""}
             onChange={(e) => update(active, { title: e.target.value })}
+            disabled={!canEdit}
             placeholder="Slide title"
-            className="w-full bg-transparent font-display text-2xl font-bold focus:outline-none"
+            className="w-full bg-transparent font-display text-4xl font-bold focus:outline-none disabled:opacity-90"
           />
           <textarea
             value={slides[active]?.body ?? ""}
             onChange={(e) => update(active, { body: e.target.value })}
+            disabled={!canEdit}
             placeholder="Bullet points or speaker notes…"
-            rows={14}
-            className="mt-4 w-full resize-y bg-transparent text-base leading-relaxed focus:outline-none"
+            rows={12}
+            className="mt-6 w-full resize-y bg-transparent text-lg leading-relaxed focus:outline-none disabled:opacity-90"
           />
         </div>
       </div>
 
-      {presenting && (
-        <Presenter slides={slides} onClose={() => setPresenting(false)} />
-      )}
-    </div>
+      {presenting && <Presenter slides={slides} onClose={() => setPresenting(false)} />}
+    </ToolShell>
   );
 }
 
 function Presenter({ slides, onClose }: { slides: Slide[]; onClose: () => void }) {
   const [i, setI] = useState(0);
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -147,7 +192,6 @@ function Presenter({ slides, onClose }: { slides: Slide[]; onClose: () => void }
   }, [slides.length, onClose]);
 
   const s = slides[i];
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-calabar-ink text-white">
       <header className="flex items-center justify-between px-6 py-3">
