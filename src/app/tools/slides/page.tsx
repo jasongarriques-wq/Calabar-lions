@@ -14,18 +14,23 @@ type Deck = {
 };
 
 export default async function SlidesPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { data } = await supabase
-    .from("slide_decks")
-    .select("id, title, slides, updated_at")
-    .eq("owner_id", user?.id ?? "")
-    .order("updated_at", { ascending: false })
-    .limit(100);
-  const decks = (data as Deck[] | null) ?? [];
+  let decks: Deck[] = [];
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from("slide_decks")
+      .select("id, title, slides, updated_at")
+      .eq("owner_id", user?.id ?? "")
+      .order("updated_at", { ascending: false })
+      .limit(100);
+    if (error) console.error("[slides list]", error);
+    decks = (data as Deck[] | null) ?? [];
+  } catch (e) {
+    console.error("[slides list] fatal", e);
+  }
 
   return (
     <main>

@@ -18,17 +18,22 @@ type Project = {
 };
 
 export default async function SbaPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { data } = await supabase
-    .from("sba_projects")
-    .select("id, title, subject, status, percent_complete, due_date, updated_at")
-    .eq("student_id", user?.id ?? "")
-    .order("updated_at", { ascending: false });
-  const projects = (data as Project[] | null) ?? [];
+  let projects: Project[] = [];
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from("sba_projects")
+      .select("id, title, subject, status, percent_complete, due_date, updated_at")
+      .eq("student_id", user?.id ?? "")
+      .order("updated_at", { ascending: false });
+    if (error) console.error("[sba list]", error);
+    projects = (data as Project[] | null) ?? [];
+  } catch (e) {
+    console.error("[sba list] fatal", e);
+  }
 
   return (
     <main>

@@ -34,36 +34,50 @@ type Profile = {
 };
 
 export default async function DocsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let docsData: DocRow[] | null = null;
+  let profile: Profile | null = null;
+  let sharedData: unknown = null;
 
-  const [{ data: docsData }, { data: profile }, { data: sharedData }] = await Promise.all([
-    supabase
-      .from("documents")
-      .select("id, title, body, subject, status, updated_at")
-      .eq("owner_id", user?.id ?? "")
-      .eq("kind", "doc")
-      .order("updated_at", { ascending: false })
-      .limit(100),
-    supabase
-      .from("profiles")
-      .select("class_group, form")
-      .eq("id", user?.id ?? "")
-      .maybeSingle<Profile>(),
-    supabase
-      .from("document_shares")
-      .select(
-        "document_id, can_edit, document:documents!document_shares_document_id_fkey(id, title, subject, status, updated_at, owner:profiles!documents_owner_id_fkey(display_name, full_name))",
-      )
-      .eq("shared_with_id", user?.id ?? "")
-      .order("created_at", { ascending: false })
-      .limit(50),
-  ]);
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-  const docs = (docsData as DocRow[] | null) ?? [];
-  const sharedRaw = (sharedData as unknown as Array<{
+    const [docsRes, profileRes, sharedRes] = await Promise.all([
+      supabase
+        .from("documents")
+        .select("id, title, body, subject, status, updated_at")
+        .eq("owner_id", user?.id ?? "")
+        .eq("kind", "doc")
+        .order("updated_at", { ascending: false })
+        .limit(100),
+      supabase
+        .from("profiles")
+        .select("class_group, form")
+        .eq("id", user?.id ?? "")
+        .maybeSingle<Profile>(),
+      supabase
+        .from("document_shares")
+        .select(
+          "document_id, can_edit, document:documents(id, title, subject, status, updated_at, owner:profiles(display_name, full_name))",
+        )
+        .eq("shared_with_id", user?.id ?? "")
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
+    if (docsRes.error) console.error("[docs list] documents", docsRes.error);
+    if (profileRes.error) console.error("[docs list] profile", profileRes.error);
+    if (sharedRes.error) console.error("[docs list] shared", sharedRes.error);
+    docsData = docsRes.data as DocRow[] | null;
+    profile = profileRes.data ?? null;
+    sharedData = sharedRes.data;
+  } catch (e) {
+    console.error("[docs list] fatal", e);
+  }
+
+  const docs = docsData ?? [];
+  const sharedRaw = (sharedData as Array<{
     document_id: string;
     can_edit: boolean;
     document:
