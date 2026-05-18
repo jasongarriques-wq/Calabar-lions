@@ -254,7 +254,7 @@ export function DocEditor(props: Props) {
         <section
           className={`relative flex min-h-0 flex-col overflow-hidden bg-[#c9cfdb] ${
             outlineOpen && assistantOpen
-              ? "col-span-7"
+              ? "col-span-6"
               : outlineOpen || assistantOpen
                 ? "col-span-9"
                 : "col-span-12"
@@ -265,7 +265,7 @@ export function DocEditor(props: Props) {
             <div
               className="mx-auto rounded-sm bg-white px-14 py-16 shadow-[0_6px_30px_rgba(15,23,42,0.18)] ring-1 ring-slate-300 print:max-w-none print:rounded-none print:shadow-none print:ring-0"
               style={{
-                width: 1020,
+                width: "min(100%, 1100px)",
                 minHeight: 1500,
                 transform: `scale(${zoom / 100})`,
                 transformOrigin: "top center",
@@ -871,7 +871,7 @@ function StyleSwatch({
 function Ruler() {
   return (
     <div className="border-b border-slate-300 bg-white px-4 py-1 print:hidden">
-      <div className="mx-auto flex max-w-[1020px] items-center justify-between text-[10px] text-slate-400">
+      <div className="mx-auto flex max-w-[1100px] items-center justify-between text-[10px] text-slate-400">
         {Array.from({ length: 17 }).map((_, i) => (
           <span key={i}>{i - 1}</span>
         ))}
