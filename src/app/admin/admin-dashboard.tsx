@@ -462,6 +462,14 @@ export function AdminDashboard({ users, reports, pendingApprovals }: Props) {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
+                              <a
+                                href={`/profile/${user.id}`}
+                                className="inline-flex h-8 items-center rounded-xl border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Open
+                              </a>
                               <Button size="sm" className="rounded-xl bg-slate-950">
                                 <CheckCircle2 className="h-4 w-4" />
                               </Button>
