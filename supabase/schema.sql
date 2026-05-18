@@ -1411,3 +1411,11 @@ drop policy if exists "document_versions delete" on document_versions;
 create policy "document_versions delete" on document_versions for delete using (
   public.is_document_owner(document_id, auth.uid())
 );
+
+-------------------------------------------------------------------------------
+-- Allow users to upsert their own profile (self-heal for accounts that
+-- pre-date the handle_new_user trigger).
+-------------------------------------------------------------------------------
+drop policy if exists "profiles insert self" on profiles;
+create policy "profiles insert self" on profiles for insert
+  with check (auth.uid() = id);
