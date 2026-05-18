@@ -1441,3 +1441,64 @@ select
   end
 from auth.users u
 where not exists (select 1 from public.profiles p where p.id = u.id);
+
+-------------------------------------------------------------------------------
+-- Auto-membership: every student is a member of their class group
+-------------------------------------------------------------------------------
+
+create or replace function public.sync_student_class_membership()
+returns trigger language plpgsql security definer as $$
+declare
+  school_uuid uuid := '00000000-0000-0000-0000-000000000001';
+  target_group_id uuid;
+begin
+  -- Remove from the previous class group when class_group changes
+  if tg_op = 'UPDATE' and coalesce(old.class_group, '') <> coalesce(new.class_group, '') then
+    delete from group_members gm
+    using groups g
+    where gm.user_id = new.id
+      and gm.group_id = g.id
+      and g.school_id = school_uuid
+      and g.type = 'class'
+      and g.parent_id is null
+      and g.slug = 'class-' || coalesce(old.class_group, '');
+  end if;
+
+  if coalesce(new.class_group, '') = '' then
+    return new;
+  end if;
+
+  select id into target_group_id
+    from groups
+   where school_id = school_uuid
+     and type = 'class'
+     and parent_id is null
+     and slug = 'class-' || new.class_group
+   limit 1;
+
+  if target_group_id is not null then
+    insert into group_members (group_id, user_id, role)
+    values (target_group_id, new.id, 'member')
+    on conflict (group_id, user_id) do nothing;
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists profiles_class_membership_sync on profiles;
+create trigger profiles_class_membership_sync
+  after insert or update of class_group on profiles
+  for each row execute function public.sync_student_class_membership();
+
+-- One-time backfill: enrol every student in their class group based on current class_group
+insert into group_members (group_id, user_id, role)
+select g.id, p.id, 'member'
+  from profiles p
+  join groups g
+    on g.school_id = '00000000-0000-0000-0000-000000000001'
+   and g.type = 'class'
+   and g.parent_id is null
+   and g.slug = 'class-' || p.class_group
+ where p.class_group is not null
+   and p.class_group <> ''
+on conflict (group_id, user_id) do nothing;

@@ -70,6 +70,16 @@ export default async function DashboardPage() {
     .order("created_at", { ascending: false })
     .limit(4);
 
+  const { data: classGroup } = profile?.class_group
+    ? await supabase
+        .from("groups")
+        .select("id, name, description, member_count:group_members(count)")
+        .eq("type", "class")
+        .is("parent_id", null)
+        .eq("slug", `class-${profile.class_group}`)
+        .maybeSingle()
+    : { data: null };
+
   return (
     <main>
       <Navbar />
@@ -87,6 +97,28 @@ export default async function DashboardPage() {
         <p className="mt-2 text-stone-600">Your day at a glance.</p>
 
         <QuickLinks isGuest={Boolean(user?.is_anonymous)} />
+
+        {classGroup && (
+          <a
+            href={`/groups/${(classGroup as { id: string }).id}`}
+            className="mt-6 flex items-center justify-between rounded-2xl border border-calabar-green-200 bg-calabar-green-50 p-4 transition hover:border-calabar-green-400"
+          >
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-calabar-green-700">
+                My class group
+              </p>
+              <p className="mt-1 text-lg font-bold text-calabar-green-900">
+                {(classGroup as { name: string }).name}
+              </p>
+              {(classGroup as { description?: string | null }).description && (
+                <p className="text-xs text-calabar-green-800/80">
+                  {(classGroup as { description?: string | null }).description}
+                </p>
+              )}
+            </div>
+            <span className="text-sm font-semibold text-calabar-green-700">Open →</span>
+          </a>
+        )}
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           <CalabarStudentCard profile={profile} email={user?.email ?? null} subjects={subjects} />
