@@ -15,19 +15,24 @@ type NoteRow = {
 };
 
 export default async function NotesPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { data } = await supabase
-    .from("documents")
-    .select("id, title, body, subject, updated_at")
-    .eq("owner_id", user?.id ?? "")
-    .eq("kind", "note")
-    .order("updated_at", { ascending: false })
-    .limit(100);
-  const notes = (data as NoteRow[] | null) ?? [];
+  let notes: NoteRow[] = [];
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from("documents")
+      .select("id, title, body, subject, updated_at")
+      .eq("owner_id", user?.id ?? "")
+      .eq("kind", "note")
+      .order("updated_at", { ascending: false })
+      .limit(100);
+    if (error) console.error("[notes list]", error);
+    notes = (data as NoteRow[] | null) ?? [];
+  } catch (e) {
+    console.error("[notes list] fatal", e);
+  }
 
   return (
     <main>

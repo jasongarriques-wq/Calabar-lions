@@ -15,10 +15,14 @@ const links = [
 ];
 
 export async function Navbar() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user: { id: string } | null = null;
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase.auth.getUser();
+    user = data.user ?? null;
+  } catch (e) {
+    console.error("[navbar] auth.getUser failed", e);
+  }
 
   return (
     <header className="border-b border-stone-200 bg-white">

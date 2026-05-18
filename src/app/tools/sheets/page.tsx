@@ -13,18 +13,23 @@ type SheetRow = {
 };
 
 export default async function SheetsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { data } = await supabase
-    .from("spreadsheets")
-    .select("id, title, updated_at")
-    .eq("owner_id", user?.id ?? "")
-    .order("updated_at", { ascending: false })
-    .limit(100);
-  const sheets = (data as SheetRow[] | null) ?? [];
+  let sheets: SheetRow[] = [];
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from("spreadsheets")
+      .select("id, title, updated_at")
+      .eq("owner_id", user?.id ?? "")
+      .order("updated_at", { ascending: false })
+      .limit(100);
+    if (error) console.error("[sheets list]", error);
+    sheets = (data as SheetRow[] | null) ?? [];
+  } catch (e) {
+    console.error("[sheets list] fatal", e);
+  }
 
   return (
     <main>
