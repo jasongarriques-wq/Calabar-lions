@@ -1419,3 +1419,25 @@ create policy "document_versions delete" on document_versions for delete using (
 drop policy if exists "profiles insert self" on profiles;
 create policy "profiles insert self" on profiles for insert
   with check (auth.uid() = id);
+
+-------------------------------------------------------------------------------
+-- One-time backfill: ensure every auth.users row has a matching profile.
+-- Safe to re-run.
+-------------------------------------------------------------------------------
+insert into public.profiles (id, full_name, display_name, role, approved)
+select
+  u.id,
+  coalesce(
+    u.raw_user_meta_data->>'full_name',
+    u.email,
+    case when coalesce(u.is_anonymous, false) then 'Guest Lion' else null end,
+    'Calabar Lion'
+  ),
+  case when coalesce(u.is_anonymous, false) then 'Guest' else null end,
+  coalesce((u.raw_user_meta_data->>'role')::user_role, 'student'),
+  case
+    when coalesce(u.raw_user_meta_data->>'role', 'student') in ('teacher', 'admin') then false
+    else true
+  end
+from auth.users u
+where not exists (select 1 from public.profiles p where p.id = u.id);
