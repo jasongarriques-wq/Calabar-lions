@@ -263,10 +263,10 @@ export function DocEditor(props: Props) {
           <Ruler />
           <div className="min-h-0 flex-1 overflow-auto px-4 py-4 print:overflow-visible print:bg-white print:p-0">
             <div
-              className="mx-auto rounded-sm bg-white px-16 py-14 shadow-[0_6px_30px_rgba(15,23,42,0.18)] ring-1 ring-slate-300 print:max-w-none print:rounded-none print:shadow-none print:ring-0"
+              className="mx-auto rounded-sm bg-white px-14 py-16 shadow-[0_6px_30px_rgba(15,23,42,0.18)] ring-1 ring-slate-300 print:max-w-none print:rounded-none print:shadow-none print:ring-0"
               style={{
-                width: 850,
-                minHeight: 1100,
+                width: 1020,
+                minHeight: 1500,
                 transform: `scale(${zoom / 100})`,
                 transformOrigin: "top center",
               }}
@@ -871,7 +871,7 @@ function StyleSwatch({
 function Ruler() {
   return (
     <div className="border-b border-slate-300 bg-white px-4 py-1 print:hidden">
-      <div className="mx-auto flex max-w-[850px] items-center justify-between text-[10px] text-slate-400">
+      <div className="mx-auto flex max-w-[1020px] items-center justify-between text-[10px] text-slate-400">
         {Array.from({ length: 17 }).map((_, i) => (
           <span key={i}>{i - 1}</span>
         ))}
