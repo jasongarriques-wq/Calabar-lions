@@ -1544,3 +1544,34 @@ returns boolean language sql stable security definer as $$
       and role in ('admin', 'super_admin', 'senior_admin', 'teacher')
   );
 $$;
+
+-------------------------------------------------------------------------------
+-- Fix: cast role to text in is_admin/is_staff so the same script can both
+-- ADD VALUE and reference it. Postgres forbids referencing a fresh enum value
+-- in the same transaction, but text comparison sidesteps that check.
+-------------------------------------------------------------------------------
+create or replace function public.is_admin(uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (
+    select 1 from profiles
+    where id = uid
+      and role::text in ('admin', 'super_admin', 'senior_admin')
+  );
+$$;
+
+create or replace function public.is_super_admin(uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (
+    select 1 from profiles
+    where id = uid and role::text in ('admin', 'super_admin')
+  );
+$$;
+
+create or replace function public.is_staff(uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (
+    select 1 from profiles
+    where id = uid
+      and role::text in ('admin', 'super_admin', 'senior_admin', 'teacher')
+  );
+$$;
