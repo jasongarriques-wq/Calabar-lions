@@ -44,7 +44,8 @@ export default async function AdminPage() {
     .eq("id", user?.id ?? "")
     .maybeSingle<{ role: string | null }>();
 
-  if (me?.role !== "admin") redirect("/dashboard");
+  const adminRoles = new Set(["admin", "super_admin", "senior_admin"]);
+  if (!adminRoles.has(me?.role ?? "")) redirect("/dashboard");
 
   const [{ data: profiles }, { data: reports }, { count: pending }] = await Promise.all([
     supabase

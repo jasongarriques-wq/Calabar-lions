@@ -29,6 +29,7 @@ import {
   MapPin,
   GraduationCap,
   Activity,
+  ClipboardList,
   Trash2,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -96,14 +97,21 @@ const clubs = [
 
 const sidebar = [
   { label: "Dashboard", icon: BarChart3 },
-  { label: "Students", icon: Users },
+  { label: "Users", icon: Users },
+  { label: "Academic Division", icon: GraduationCap },
   { label: "Classes", icon: School },
+  { label: "Subjects", icon: BookOpen },
+  { label: "Assignments", icon: ClipboardList },
+  { label: "Lion Docs", icon: BookOpen },
+  { label: "Lion Slides", icon: Megaphone },
+  { label: "Lion Sheets", icon: Activity },
   { label: "Sports", icon: Trophy },
-  { label: "Clubs", icon: Flag },
-  { label: "Teachers", icon: BookOpen },
-  { label: "Announcements", icon: Megaphone },
-  { label: "Moderation", icon: Shield },
-  { label: "Events", icon: CalendarDays },
+  { label: "Groups", icon: Flag },
+  { label: "Posts & Reports", icon: Shield },
+  { label: "Media Center", icon: Megaphone },
+  { label: "Calendar", icon: CalendarDays },
+  { label: "Notifications", icon: AlertTriangle },
+  { label: "Analytics", icon: BarChart3 },
   { label: "Settings", icon: Settings },
 ];
 
@@ -217,6 +225,16 @@ export function AdminDashboard({ users, reports, pendingApprovals }: Props) {
         </aside>
 
         <main className="flex-1 p-4 md:p-8">
+          {active !== "Dashboard" && (
+            <SectionPlaceholder
+              label={active}
+              users={users}
+              reports={reports}
+              pendingApprovals={pendingApprovals}
+            />
+          )}
+          {active === "Dashboard" && (
+            <>
           <header className="mb-8 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
               <motion.h2
@@ -648,8 +666,255 @@ export function AdminDashboard({ users, reports, pendingApprovals }: Props) {
               </Card>
             </section>
           )}
+            </>
+          )}
         </main>
       </div>
+    </div>
+  );
+}
+
+const DIVISIONS: Record<
+  string,
+  { tagline: string; bullets: string[] }
+> = {
+  Users: {
+    tagline: "Create, approve, and govern every Lion on the platform.",
+    bullets: [
+      "Create student accounts",
+      "Verify enrolment & approve teachers",
+      "Reset passwords",
+      "Assign students to forms / classes",
+      "Disciplinary records and transfers",
+    ],
+  },
+  "Academic Division": {
+    tagline: "Forms 7–11 academic operations.",
+    bullets: [
+      "Create forms & classes",
+      "Assign form teachers",
+      "Manage timetables",
+      "Manage SBA systems",
+      "Upload syllabuses",
+      "Review academic reports",
+    ],
+  },
+  Classes: {
+    tagline: "All 40 main classes + sixth-form streams.",
+    bullets: [
+      "Create / rename classes",
+      "Assign form teachers",
+      "Move students between classes",
+      "Archive a previous year's classes",
+    ],
+  },
+  Subjects: {
+    tagline: "CSEC + CAPE subject catalog.",
+    bullets: [
+      "Add or edit subjects",
+      "Tag SBA / coursework type",
+      "Assign subject teachers",
+      "Link templates to Lion Docs",
+    ],
+  },
+  Assignments: {
+    tagline: "Homework + SBA assignments by class.",
+    bullets: [
+      "Create classroom assignments",
+      "Attach Lion Docs / Sheets / Slides templates",
+      "Track submissions by class",
+      "Grade with rubric",
+    ],
+  },
+  "Lion Docs": {
+    tagline: "Essay / SBA editor administration.",
+    bullets: [
+      "Essay & SBA templates",
+      "Teacher collaboration permissions",
+      "File approvals",
+      "Shared academic libraries",
+    ],
+  },
+  "Lion Slides": {
+    tagline: "Presentation builder administration.",
+    bullets: [
+      "Presentation templates",
+      "School-branded themes",
+      "Classroom presentation permissions",
+    ],
+  },
+  "Lion Sheets": {
+    tagline: "Spreadsheet & gradebook administration.",
+    bullets: [
+      "Gradebook systems",
+      "Spreadsheet templates",
+      "Academic analytics",
+      "Attendance systems",
+    ],
+  },
+  Sports: {
+    tagline: "Sports division operations.",
+    bullets: [
+      "Create teams",
+      "Assign coaches",
+      "Upload fixtures and results",
+      "Manage athlete profiles",
+      "Training schedules",
+    ],
+  },
+  Groups: {
+    tagline: "Houses, classes, sports, clubs, alumni.",
+    bullets: [
+      "Approve new groups",
+      "Pin official groups",
+      "Audit membership",
+      "Archive old groups",
+    ],
+  },
+  "Posts & Reports": {
+    tagline: "Moderation queue across Lion Social.",
+    bullets: [
+      "Review reports",
+      "Remove inappropriate content",
+      "Suspend accounts",
+      "Conduct records",
+    ],
+  },
+  "Media Center": {
+    tagline: "School announcements and media library.",
+    bullets: [
+      "Platform-wide announcements",
+      "Homepage banners",
+      "Event promotion",
+      "Livestreams & uploads",
+      "Newsletter publishing",
+    ],
+  },
+  Calendar: {
+    tagline: "Term-wide events and academic calendar.",
+    bullets: [
+      "Term dates",
+      "Exam schedule",
+      "Sports fixtures",
+      "Club meetings",
+    ],
+  },
+  Notifications: {
+    tagline: "Platform-wide notifications and routing.",
+    bullets: [
+      "Send broadcast",
+      "Configure per-event templates",
+      "Quiet hours for students",
+    ],
+  },
+  Analytics: {
+    tagline: "Platform-wide health and engagement.",
+    bullets: [
+      "Active students per form",
+      "Submission rates",
+      "Top groups and channels",
+      "Storage usage",
+    ],
+  },
+  Settings: {
+    tagline: "Branding, security, infrastructure.",
+    bullets: [
+      "School year creation",
+      "Global settings",
+      "Branding customisation",
+      "Backup & audit logs",
+    ],
+  },
+};
+
+function SectionPlaceholder({
+  label,
+  users,
+  reports,
+  pendingApprovals,
+}: {
+  label: string;
+  users: AdminUser[];
+  reports: AdminReport[];
+  pendingApprovals: number;
+}) {
+  const meta = DIVISIONS[label];
+  return (
+    <div>
+      <header className="mb-6">
+        <p className="text-xs font-bold uppercase tracking-widest text-emerald-300/80">
+          Division
+        </p>
+        <h2 className="mt-1 text-3xl font-black tracking-tight md:text-4xl">{label}</h2>
+        {meta && <p className="mt-2 max-w-3xl text-slate-500">{meta.tagline}</p>}
+      </header>
+
+      <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {meta?.bullets.map((b) => (
+          <Card key={b} className="rounded-2xl border-slate-200 shadow-sm">
+            <CardContent className="flex items-center gap-3 p-4 text-sm">
+              <span className="grid h-7 w-7 flex-none place-items-center rounded-full bg-emerald-50 text-emerald-700">
+                ✓
+              </span>
+              <span className="font-medium">{b}</span>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {label === "Users" && (
+        <Card className="rounded-2xl border-slate-200 shadow-sm">
+          <CardContent className="p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-xl font-bold">Recent users</h3>
+              <span className="text-xs text-slate-500">
+                {pendingApprovals.toLocaleString()} pending approvals
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-slate-500">
+                    <th className="py-2 pr-4">Name</th>
+                    <th className="py-2 pr-4">Role</th>
+                    <th className="py-2 pr-4">Group</th>
+                    <th className="py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr key={u.id} className="border-b last:border-0">
+                      <td className="py-2 pr-4 font-semibold">{u.name}</td>
+                      <td className="py-2 pr-4 text-slate-600">{u.role}</td>
+                      <td className="py-2 pr-4 text-slate-600">{u.group}</td>
+                      <td className="py-2 text-slate-600">{u.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {label === "Posts & Reports" && (
+        <Card className="rounded-2xl border-slate-200 shadow-sm">
+          <CardContent className="p-5">
+            <h3 className="mb-3 text-xl font-bold">Open reports</h3>
+            <ul className="space-y-2 text-sm">
+              {reports.length === 0 && (
+                <li className="text-slate-500">No open reports — all clear.</li>
+              )}
+              {reports.map((r) => (
+                <li key={r.id} className="rounded-xl border border-slate-200 p-3">
+                  <p className="font-bold">{r.title}</p>
+                  <p className="text-xs text-slate-500">{r.area}</p>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

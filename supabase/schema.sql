@@ -1502,3 +1502,45 @@ select g.id, p.id, 'member'
  where p.class_group is not null
    and p.class_group <> ''
 on conflict (group_id, user_id) do nothing;
+
+-------------------------------------------------------------------------------
+-- Admin hierarchy: super_admin / senior_admin / division assignment
+-------------------------------------------------------------------------------
+
+-- Postgres enums can be extended but only outside a transaction.
+-- Wrap each addition in a guard so re-running is safe.
+do $$ begin
+  alter type user_role add value if not exists 'senior_admin';
+exception when others then null; end $$;
+do $$ begin
+  alter type user_role add value if not exists 'super_admin';
+exception when others then null; end $$;
+
+alter table profiles
+  add column if not exists admin_division text;
+-- expected values: academic | student | sports | moderation | lion_tools | media
+
+create or replace function public.is_admin(uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (
+    select 1 from profiles
+    where id = uid and role in ('admin', 'super_admin', 'senior_admin')
+  );
+$$;
+
+create or replace function public.is_super_admin(uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (
+    select 1 from profiles
+    where id = uid and role in ('admin', 'super_admin')
+  );
+$$;
+
+create or replace function public.is_staff(uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (
+    select 1 from profiles
+    where id = uid
+      and role in ('admin', 'super_admin', 'senior_admin', 'teacher')
+  );
+$$;
