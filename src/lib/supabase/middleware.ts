@@ -12,6 +12,7 @@ const PROTECTED_PREFIXES = [
   "/admin",
   "/notifications",
   "/tools",
+  "/profile",
 ];
 
 export async function updateSession(request: NextRequest) {
