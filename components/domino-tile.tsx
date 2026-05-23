@@ -117,9 +117,10 @@ export default function DominoTileComponent({
           width: tileW,
           height: tileH,
           borderRadius: radius,
-          background: "linear-gradient(145deg, #1c1208, #120c05)",
-          border: `${border}px solid rgba(120,80,20,0.4)`,
-          boxShadow: "0 2px 8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,210,80,0.06)",
+          // Solid near-black back — clearly visible on the green felt
+          background: "linear-gradient(145deg, #111111, #0a0a0a)",
+          border: `${border}px solid rgba(255,255,255,0.18)`,
+          boxShadow: "0 2px 10px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.06), inset 0 1px 0 rgba(255,255,255,0.05)",
           opacity: dimmed ? 0.35 : 1,
           flexShrink: 0,
           cursor: onClick ? "pointer" : "default",
@@ -130,7 +131,7 @@ export default function DominoTileComponent({
         <span
           style={{
             fontSize: Math.round(size * 0.35),
-            opacity: 0.15,
+            opacity: 0.18,
             filter: "sepia(1) hue-rotate(80deg)",
           }}
         >

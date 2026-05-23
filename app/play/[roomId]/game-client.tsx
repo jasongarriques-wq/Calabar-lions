@@ -939,7 +939,7 @@ export default function GameClient({ room, currentProfile }: Props) {
         {/* Tiles — always rendered; dimmed when empty seat */}
         <div
           className={`flex ${isTop ? "flex-row" : "flex-col"} gap-px`}
-          style={{ opacity: isEmpty ? 0.25 : 1 }}
+          style={{ opacity: isEmpty ? 0.5 : 1 }}
         >
           {Array.from({ length: tileCount }).map((_, i) => (
             <DominoTileComponent
