@@ -909,13 +909,24 @@ export default function GameClient({ room, currentProfile }: Props) {
 
   function renderOpponentHand(player: GamePlayer | null, position: "top" | "left" | "right") {
     const isTop = position === "top";
-    const tileCount = player ? Math.min(player.tile_count ?? (player.hand?.length ?? 0), isTop ? 7 : 12) : 3;
-    const isActive = !!player && player.profile_id === session?.current_turn;
+    const isEmpty = !player;
+    // Always show tiles — ghost when empty, real count when occupied
+    const tileCount = isEmpty ? 5 : Math.min(player.tile_count ?? (player.hand?.length ?? 0), isTop ? 7 : 12);
+    const isActive = !isEmpty && player.profile_id === session?.current_turn;
 
     return (
-      <div className="flex flex-col items-center gap-1">
-        {/* Avatar — or ghost placeholder for empty seat */}
-        {player ? (
+      <div className="flex flex-col items-center gap-1 select-none">
+        {/* Avatar or empty-seat ghost */}
+        {isEmpty ? (
+          <div className="flex flex-col items-center gap-0.5 opacity-30">
+            <div
+              className="rounded-full border-2 border-dashed border-zinc-500 flex items-center justify-center"
+              style={{ width: 28, height: 28, background: "rgba(0,0,0,0.4)" }}
+            >
+              <span className="text-zinc-400" style={{ fontSize: 11 }}>?</span>
+            </div>
+          </div>
+        ) : (
           <PlayerAvatar
             name={player.display_name}
             score={player.score ?? 0}
@@ -923,20 +934,12 @@ export default function GameClient({ room, currentProfile }: Props) {
             tileCount={player.tile_count ?? player.hand?.length ?? 0}
             size={28}
           />
-        ) : (
-          <div className="flex flex-col items-center gap-0.5 opacity-20 select-none">
-            <div className="w-7 h-7 rounded-full bg-zinc-700 border-2 border-dashed border-zinc-600 flex items-center justify-center">
-              <span className="text-zinc-500 text-[10px]">?</span>
-            </div>
-            <span className="text-[8px] text-zinc-600 font-bold tracking-wide uppercase">
-              {isTop ? "North" : position === "left" ? "West" : "East"}
-            </span>
-          </div>
         )}
 
-        {/* Face-down tiles (ghost if empty seat) */}
+        {/* Tiles — always rendered; dimmed when empty seat */}
         <div
-          className={`flex ${isTop ? "flex-row" : "flex-col"} gap-px ${!player ? "opacity-10" : ""}`}
+          className={`flex ${isTop ? "flex-row" : "flex-col"} gap-px`}
+          style={{ opacity: isEmpty ? 0.25 : 1 }}
         >
           {Array.from({ length: tileCount }).map((_, i) => (
             <DominoTileComponent
@@ -1663,27 +1666,26 @@ export default function GameClient({ room, currentProfile }: Props) {
                   </div>
                 </div>
 
-                {/* Top opponent */}
-                <div className="flex items-start justify-center pt-8 pb-1 z-10 relative">
+                {/* ── Opponent hands pinned to canvas edges (always visible) ── */}
+
+                {/* North opponent — top center */}
+                <div className="absolute top-10 left-1/2 -translate-x-1/2 z-10">
                   {renderOpponentHand(opponentTop, "top")}
                 </div>
 
-                {/* Middle row */}
-                <div className="flex flex-1 items-center overflow-hidden z-10 relative">
-                  {/* Left opponent */}
-                  <div className="flex w-20 items-center justify-center px-1 shrink-0">
-                    {renderOpponentHand(opponentLeft, "left")}
-                  </div>
+                {/* West opponent — left center */}
+                <div className="absolute left-2 top-1/2 -translate-y-1/2 z-10">
+                  {renderOpponentHand(opponentLeft, "left")}
+                </div>
 
-                  {/* Board chain */}
-                  <div className="flex flex-1 items-center justify-center overflow-hidden">
-                    {renderBoard()}
-                  </div>
+                {/* East opponent — right center */}
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
+                  {renderOpponentHand(opponentRight, "right")}
+                </div>
 
-                  {/* Right opponent */}
-                  <div className="flex w-20 items-center justify-center px-1 shrink-0">
-                    {renderOpponentHand(opponentRight, "right")}
-                  </div>
+                {/* Board chain — full middle, padded so it doesn't clash with pinned opponents */}
+                <div className="flex flex-1 items-center justify-center overflow-hidden z-10 relative px-24 pt-16 pb-2">
+                  {renderBoard()}
                 </div>
 
                 {/* My player area */}
