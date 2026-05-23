@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: #09090b;
+    --foreground: #fafafa;
+  }
+  body {
+    @apply bg-zinc-950 text-white antialiased;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-zinc-800 bg-zinc-900 p-4;
+  }
+  .btn-primary {
+    @apply rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white hover:bg-green-500 transition-colors;
+  }
+  .btn-secondary {
+    @apply rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-700 transition-colors;
+  }
+  .input {
+    @apply w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-white placeholder:text-zinc-500 focus:border-green-600 focus:outline-none focus:ring-1 focus:ring-green-600;
+  }
+  .label {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400;
+  }
+}
