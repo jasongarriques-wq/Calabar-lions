@@ -908,36 +908,43 @@ export default function GameClient({ room, currentProfile }: Props) {
   // ── Render helpers ─────────────────────────────────────────────────────────
 
   function renderOpponentHand(player: GamePlayer | null, position: "top" | "left" | "right") {
-    if (!player) {
-      return (
-        <div className="flex items-center justify-center opacity-20">
-          <div className="text-xs text-zinc-600">Empty seat</div>
-        </div>
-      );
-    }
-    const count = Math.min(player.tile_count ?? (player.hand?.length ?? 0), 10);
-    const isActive = player.profile_id === session?.current_turn;
+    const isTop = position === "top";
+    const tileCount = player ? Math.min(player.tile_count ?? (player.hand?.length ?? 0), isTop ? 7 : 12) : 3;
+    const isActive = !!player && player.profile_id === session?.current_turn;
+
     return (
-      <div
-        className={`flex ${
-          position === "top" ? "flex-col items-center" : "flex-col items-center"
-        } gap-2`}
-      >
-        <PlayerAvatar
-          name={player.display_name}
-          score={player.score ?? 0}
-          isActive={isActive}
-          tileCount={player.tile_count ?? player.hand?.length ?? 0}
-          size={28}
-        />
-        <div className={`flex ${position === "top" ? "flex-row" : "flex-col"} gap-px`}>
-          {Array.from({ length: count }).map((_, i) => (
+      <div className="flex flex-col items-center gap-1">
+        {/* Avatar — or ghost placeholder for empty seat */}
+        {player ? (
+          <PlayerAvatar
+            name={player.display_name}
+            score={player.score ?? 0}
+            isActive={isActive}
+            tileCount={player.tile_count ?? player.hand?.length ?? 0}
+            size={28}
+          />
+        ) : (
+          <div className="flex flex-col items-center gap-0.5 opacity-20 select-none">
+            <div className="w-7 h-7 rounded-full bg-zinc-700 border-2 border-dashed border-zinc-600 flex items-center justify-center">
+              <span className="text-zinc-500 text-[10px]">?</span>
+            </div>
+            <span className="text-[8px] text-zinc-600 font-bold tracking-wide uppercase">
+              {isTop ? "North" : position === "left" ? "West" : "East"}
+            </span>
+          </div>
+        )}
+
+        {/* Face-down tiles (ghost if empty seat) */}
+        <div
+          className={`flex ${isTop ? "flex-row" : "flex-col"} gap-px ${!player ? "opacity-10" : ""}`}
+        >
+          {Array.from({ length: tileCount }).map((_, i) => (
             <DominoTileComponent
               key={i}
               tile={[0, 0]}
               facedown
-              size={position === "top" ? 16 : 14}
-              horizontal={position === "top"}
+              size={isTop ? 16 : 14}
+              horizontal={isTop}
             />
           ))}
         </div>
@@ -1664,7 +1671,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                 {/* Middle row */}
                 <div className="flex flex-1 items-center overflow-hidden z-10 relative">
                   {/* Left opponent */}
-                  <div className="flex w-16 items-center justify-center px-1 shrink-0">
+                  <div className="flex w-20 items-center justify-center px-1 shrink-0">
                     {renderOpponentHand(opponentLeft, "left")}
                   </div>
 
@@ -1674,7 +1681,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                   </div>
 
                   {/* Right opponent */}
-                  <div className="flex w-16 items-center justify-center px-1 shrink-0">
+                  <div className="flex w-20 items-center justify-center px-1 shrink-0">
                     {renderOpponentHand(opponentRight, "right")}
                   </div>
                 </div>
