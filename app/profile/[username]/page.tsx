@@ -43,7 +43,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
                 {viewedProfile.approved && <span title="Verified">✅</span>}
               </div>
               {viewedProfile.display_name && viewedProfile.display_name !== viewedProfile.full_name && (
-                <p className="text-sm text-zinc-500">"{viewedProfile.display_name}"</p>
+                <p className="text-sm text-zinc-500">&ldquo;{viewedProfile.display_name}&rdquo;</p>
               )}
               {viewedProfile.bio && <p className="mt-2 text-sm text-zinc-300">{viewedProfile.bio}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
