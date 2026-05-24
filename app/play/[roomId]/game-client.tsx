@@ -298,6 +298,7 @@ export default function GameClient({ room, currentProfile }: Props) {
   const [showEndChoices, setShowEndChoices] = useState(false);
   const [draggedTileIdx, setDraggedTileIdx] = useState<number | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [rotatedTiles, setRotatedTiles] = useState<Set<number>>(new Set());
   const [autoRestartCount, setAutoRestartCount] = useState<number | null>(null);
   const autoRestartRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -879,6 +880,7 @@ export default function GameClient({ room, currentProfile }: Props) {
 
     setSelectedTile(null);
     setShowEndChoices(false);
+    setRotatedTiles(new Set()); // clear rotations after a tile is played
     setActionLoading(false);
   }
 
@@ -977,6 +979,7 @@ export default function GameClient({ room, currentProfile }: Props) {
     const sorted = sortHand(myHand);
     setMyPlayer({ ...myPlayer, hand: sorted });
     setSelectedTile(null);
+    setRotatedTiles(new Set()); // indices shift after sort — clear all rotations
   }
 
   function handleTileClick(i: number) {
@@ -991,18 +994,16 @@ export default function GameClient({ room, currentProfile }: Props) {
   }
 
   function handleDoubleClickTile(i: number) {
-    if (!isMyTurn) return;
-    const tile    = myHand[i];
-    // Use effectiveLeftEnd/Right so the Caribbean arm constraint is respected
-    const matches = canPlayEnds(tile, effectiveLeftEnd, effectiveRightEnd, topEnd, bottomEnd);
-    if (matches === "none") { showToast("That tile can't be played here!"); return; }
-    if (Array.isArray(matches) && matches.length > 1) {
-      setSelectedTile(i);
-      setShowEndChoices(true);
-    } else {
-      setSelectedTile(i);
-      handlePlayTile("auto", i);
-    }
+    // Double-click rotates (flips) the tile in hand — purely visual.
+    // The connecting logic always finds the right orientation when played.
+    setRotatedTiles(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+    // Also select it so the player sees it highlighted
+    setSelectedTile(i);
+    setShowEndChoices(false);
   }
 
   function handleDragStart(e: React.DragEvent<HTMLDivElement>, i: number) {
@@ -2158,23 +2159,33 @@ export default function GameClient({ room, currentProfile }: Props) {
                         {actionLoading ? "Dealing..." : "Deal Tiles"}
                       </motion.button>
                     ) : (
-                      myHand.map((tile, i) => (
-                        <DominoTileComponent
-                          key={i}
-                          tile={tile}
-                          horizontal
-                          size={36}
-                          selected={selectedTile === i}
-                          playable={isMyTurn && playable[i] && selectedTile !== i}
-                          dimmed={isMyTurn && !playable[i]}
-                          isDragging={draggedTileIdx === i}
-                          onClick={() => handleTileClick(i)}
-                          onDoubleClick={() => handleDoubleClickTile(i)}
-                          draggable={isMyTurn}
-                          onDragStart={(e) => handleDragStart(e, i)}
-                          onDragEnd={handleDragEnd}
-                        />
-                      ))
+                      myHand.map((tile, i) => {
+                        const isRotated = rotatedTiles.has(i);
+                        const displayTile: DominoTile = isRotated ? [tile[1], tile[0]] : tile;
+                        return (
+                          <motion.div
+                            key={i}
+                            animate={{ rotateY: isRotated ? 180 : 0 }}
+                            transition={{ type: "spring", stiffness: 320, damping: 22 }}
+                            style={{ display: "inline-flex", transformStyle: "preserve-3d" }}
+                          >
+                            <DominoTileComponent
+                              tile={displayTile}
+                              horizontal
+                              size={36}
+                              selected={selectedTile === i}
+                              playable={isMyTurn && playable[i] && selectedTile !== i}
+                              dimmed={isMyTurn && !playable[i]}
+                              isDragging={draggedTileIdx === i}
+                              onClick={() => handleTileClick(i)}
+                              onDoubleClick={() => handleDoubleClickTile(i)}
+                              draggable={isMyTurn}
+                              onDragStart={(e) => handleDragStart(e, i)}
+                              onDragEnd={handleDragEnd}
+                            />
+                          </motion.div>
+                        );
+                      })
                     )}
                   </div>
                 </div>
