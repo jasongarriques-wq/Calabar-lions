@@ -53,7 +53,7 @@ function generateInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-const POINTS_PRESETS = [50, 100, 200];
+const POINTS_PRESETS = [3, 6, 9];
 const ROUND_PRESETS = [5, 10, 15, 20];
 
 export default function CreateTablePage() {
@@ -63,7 +63,7 @@ export default function CreateTablePage() {
   const [name, setName] = useState("");
   const [gameMode, setGameMode] = useState<GameMode>("draw");
   const [maxPlayers, setMaxPlayers] = useState(4);
-  const [pointsToWin, setPointsToWin] = useState(100);
+  const [pointsToWin, setPointsToWin] = useState(6);
   const [maxRounds, setMaxRounds] = useState(10);
   const [isPrivate, setIsPrivate] = useState(false);
   const [inviteCode, setInviteCode] = useState(generateInviteCode());
@@ -277,9 +277,10 @@ export default function CreateTablePage() {
               </div>
             )}
 
-            {/* Points Target */}
+            {/* Series Length */}
             <div className="mb-5">
-              <p className="text-xs font-semibold text-zinc-400 mb-2">Points Target</p>
+              <p className="text-xs font-semibold text-zinc-400 mb-1">Series Length</p>
+              <p className="text-[10px] text-zinc-600 mb-2">First player / team to reach this many wins takes the series</p>
               <div className="flex gap-2">
                 {POINTS_PRESETS.map((p) => (
                   <button
@@ -294,7 +295,7 @@ export default function CreateTablePage() {
                       boxShadow: pointsToWin === p ? "0 0 12px rgba(217,119,6,0.2)" : "none",
                     }}
                   >
-                    {p} pts
+                    {p === 6 ? "6 (Standard)" : `${p} wins`}
                   </button>
                 ))}
               </div>

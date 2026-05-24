@@ -144,7 +144,7 @@ const MODE_LABELS: Record<GameMode, string> = {
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type GamePhase = "lobby" | "playing" | "blocked" | "gameOver";
+type GamePhase = "lobby" | "playing" | "blocked" | "gameOver" | "seriesOver";
 type ChatTab = "chat" | "players";
 
 interface FloatingReaction {
@@ -589,7 +589,7 @@ export default function GameClient({ room, currentProfile }: Props) {
     setActionLoading(false);
   }
 
-  async function handleStartGame() {
+  async function handleStartGame(resetScores = false) {
     if (!currentProfile) return;
     setActionLoading(true);
 
@@ -665,7 +665,10 @@ export default function GameClient({ room, currentProfile }: Props) {
       firstTurnProfileId = allProfileIds[firstTurnIdx] ?? currentProfile.id;
     }
     const scores: Record<string, number> = {};
-    allProfileIds.forEach((id) => { scores[id] = seatedPlayers.find((p) => p.profile_id === id)?.score ?? 0; });
+    allProfileIds.forEach((id) => {
+      // resetScores = true when starting a fresh series; otherwise carry wins forward
+      scores[id] = resetScores ? 0 : (seatedPlayers.find((p) => p.profile_id === id)?.score ?? 0);
+    });
 
     const newSession: GameSession = {
       id: sessionId,
@@ -818,39 +821,34 @@ export default function GameClient({ room, currentProfile }: Props) {
       // ── DOMINO! ─────────────────────────────────────────────────────────
       showToast("🀱 DOMINO!");
 
-      // ── Caribbean team scoring ────────────────────────────────────────────
-      // teams mode (2v2): seats 0,2 = team A; seats 1,3 = team B.
-      // Winner's team scores the sum of OPPONENT team's pips only.
+      // ── Caribbean series scoring: each hand won = +1 win ─────────────────
       const myPlayer_ = allPlayers.find(p => p.profile_id === currentProfile.id);
       const mySeat    = myPlayer_?.seat ?? 0;
       const isTeams   = gameMode === "teams";
+      const seriesTarget = room.points_to_win ?? 6;
 
-      const roundScore = allPlayers.reduce((sum, p) => {
-        if (p.profile_id === currentProfile.id) return sum;
-        if (isTeams && mySeat % 2 === p.seat % 2) return sum; // skip partner
-        return sum + calculatePips(p.hand ?? []);
-      }, 0);
-
-      // In teams mode, credit both partners' score line equally
       if (isTeams) {
-        const partnerIds = allPlayers
+        // Both partners get +1
+        allPlayers
           .filter(p => p.seat % 2 === mySeat % 2)
-          .map(p => p.profile_id);
-        partnerIds.forEach(id => {
-          newScores[id] = (newScores[id] ?? 0) + roundScore;
-        });
+          .forEach(p => { newScores[p.profile_id] = (newScores[p.profile_id] ?? 0) + 1; });
       } else {
-        newScores[currentProfile.id] = (newScores[currentProfile.id] ?? 0) + roundScore;
+        newScores[currentProfile.id] = (newScores[currentProfile.id] ?? 0) + 1;
       }
 
-      // Store winner as current_turn so next round knows who plays first
+      // Check if series is now won
+      const myNewWins   = newScores[currentProfile.id] ?? 0;
+      const seriesWon   = myNewWins >= seriesTarget;
+      const nextPhase: GamePhase = seriesWon ? "seriesOver" : "gameOver";
+
+      // Store winner as current_turn so next hand knows who plays first
       await supabase.from("game_sessions").update({
         board, left_end: lEnd, right_end: rEnd, current_turn: currentProfile.id,
         scores: newScores, status: "finished", consecutive_passes: 0,
         updated_at: new Date().toISOString(),
       }).eq("id", session.id);
       await supabase.from("game_rooms").update({ status: "finished" }).eq("id", room.id);
-      setGamePhase("gameOver");
+      setGamePhase(nextPhase);
     } else {
       await supabase.from("game_sessions").update({
         board, left_end: lEnd, right_end: rEnd, current_turn: nextTurn,
@@ -906,35 +904,35 @@ export default function GameClient({ room, currentProfile }: Props) {
 
       // ── Caribbean blocked scoring ─────────────────────────────────────────
       // Lowest pip total wins. In teams, lowest combined team pip total wins.
-      // Winner scores the sum of opponent pip counts.
+      // ── Caribbean series scoring: blocked hand winner gets +1 win ─────────
       const newScores = { ...(session.scores ?? {}) };
+      const seriesTarget = room.points_to_win ?? 6;
+      const blockWinnerId = results[0]?.playerId ?? nextTurn;
+
       if (results[0]) {
         const isTeams = gameMode === "teams";
         if (isTeams) {
-          // Find winning player and their seat
           const winnerPlayer = allPlayers.find(p => p.profile_id === results[0].playerId);
           const winnerSeat   = winnerPlayer?.seat ?? 0;
-          // Opponent team pips
-          const opponentScore = allPlayers
-            .filter(p => p.seat % 2 !== winnerSeat % 2)
-            .reduce((s, p) => s + calculatePips(p.hand ?? []), 0);
-          // Credit both partners
           allPlayers
             .filter(p => p.seat % 2 === winnerSeat % 2)
-            .forEach(p => { newScores[p.profile_id] = (newScores[p.profile_id] ?? 0) + opponentScore; });
+            .forEach(p => { newScores[p.profile_id] = (newScores[p.profile_id] ?? 0) + 1; });
         } else {
-          const winnerScore = results.slice(1).reduce((s, r) => s + r.remainingPips, 0);
-          newScores[results[0].playerId] = (newScores[results[0].playerId] ?? 0) + winnerScore;
+          newScores[results[0].playerId] = (newScores[results[0].playerId] ?? 0) + 1;
         }
       }
 
+      // Check series win
+      const blockWinnerNewScore = newScores[blockWinnerId] ?? 0;
+      const blockSeriesWon = blockWinnerNewScore >= seriesTarget;
+
       // Store winner as current_turn so next round knows who plays first
-      const blockWinnerId = results[0]?.playerId ?? nextTurn;
       await supabase.from("game_sessions").update({
         current_turn: blockWinnerId, consecutive_passes: newPasses, scores: newScores,
         status: "finished", updated_at: new Date().toISOString(),
       }).eq("id", session.id);
       await supabase.from("game_rooms").update({ status: "finished" }).eq("id", room.id);
+      setGamePhase(blockSeriesWon ? "seriesOver" : "blocked");
     } else {
       await supabase.from("game_sessions").update({
         current_turn: nextTurn, consecutive_passes: newPasses,
@@ -1282,8 +1280,8 @@ export default function GameClient({ room, currentProfile }: Props) {
               <p className="text-xs font-black text-white">{session?.round_number ?? 1}<span className="text-zinc-600">/{session?.max_rounds ?? room.max_rounds}</span></p>
             </div>
             <div>
-              <p className="text-[9px] font-black uppercase tracking-widest text-zinc-600">Target</p>
-              <p className="text-xs font-black" style={{ color: "#f59e0b" }}>{room.points_to_win}</p>
+              <p className="text-[9px] font-black uppercase tracking-widest text-zinc-600">Series</p>
+              <p className="text-xs font-black" style={{ color: "#f59e0b" }}>First to {room.points_to_win}</p>
             </div>
           </div>
         </div>
@@ -1479,7 +1477,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                   <div className="text-5xl mb-3">🦁</div>
                   <h2 className="text-2xl font-black text-white">{room.name}</h2>
                   <p className="text-sm mt-1 text-zinc-500">
-                    {MODE_LABELS[gameMode]} · Target: {room.points_to_win} pts · {room.max_rounds} rounds
+                    {MODE_LABELS[gameMode]} · First to {room.points_to_win} wins
                   </p>
 
                   {room.is_private && room.invite_code && (
@@ -1547,7 +1545,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                     {isHost ? (
                       allPlayers.length >= 2 ? (
                         <motion.button
-                          onClick={handleStartGame}
+                          onClick={() => handleStartGame()}
                           disabled={actionLoading}
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
@@ -1560,7 +1558,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                         </motion.button>
                       ) : (
                         <button
-                          onClick={handleStartGame}
+                          onClick={() => handleStartGame()}
                           disabled={actionLoading}
                           className="w-full rounded-xl py-3 text-sm font-bold text-zinc-400 transition-colors hover:text-white"
                           style={{ background: "#1a1a1a", border: "1px solid #2a2a2a" }}
@@ -1679,7 +1677,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                 </div>
                 <div className="p-6 pt-0 flex gap-3">
                   <button
-                    onClick={handleStartGame}
+                    onClick={() => handleStartGame()}
                     disabled={actionLoading}
                     className="flex-1 rounded-xl py-3 text-sm font-black text-white disabled:opacity-50"
                     style={{ background: "linear-gradient(135deg, #d97706, #f59e0b)", color: "#1a0a00" }}
@@ -1697,8 +1695,117 @@ export default function GameClient({ room, currentProfile }: Props) {
               </motion.div>
             </div>
 
+          ) : gamePhase === "seriesOver" ? (
+            // ── SERIES OVER ─────────────────────────────────────────────────
+            (() => {
+              const seriesTarget = room.points_to_win ?? 6;
+              const sorted = Object.entries(session?.scores ?? {})
+                .sort((a, b) => (b[1] as number) - (a[1] as number));
+              const topScore   = (sorted[0]?.[1] as number) ?? 0;
+              const runnerScore = (sorted[1]?.[1] as number) ?? 0;
+              const isLove     = runnerScore === 0;
+              const winnerName = allPlayers.find(p => p.profile_id === sorted[0]?.[0])?.display_name ?? "Winner";
+              const iWon       = sorted[0]?.[0] === currentProfile?.id;
+              return (
+                <div className="flex flex-1 items-center justify-center p-6">
+                  <motion.div
+                    initial={{ scale: 0.85, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 200, damping: 18 }}
+                    className="w-full max-w-md rounded-3xl border overflow-hidden"
+                    style={{ background: "#111111", borderColor: "#222222" }}
+                  >
+                    {/* Header */}
+                    <div className="p-6 text-center border-b" style={{ borderColor: "#222222", background: "rgba(16,185,129,0.05)" }}>
+                      <motion.div
+                        animate={{ rotate: [0, -10, 10, -5, 5, 0] }}
+                        transition={{ delay: 0.3, duration: 0.6 }}
+                        className="text-5xl mb-3"
+                      >
+                        🏆
+                      </motion.div>
+                      <h2 className="text-2xl font-black text-white">SERIES OVER!</h2>
+                      {isLove ? (
+                        <div className="mt-2">
+                          <p className="text-lg font-black" style={{ color: "#10b981" }}>
+                            {seriesTarget} — LOVE 😤
+                          </p>
+                          <p className="text-xs text-zinc-500 mt-1">A perfect series. Not a single hand dropped.</p>
+                        </div>
+                      ) : (
+                        <p className="text-3xl font-black mt-2" style={{ color: "#f59e0b" }}>
+                          {topScore} — {runnerScore}
+                        </p>
+                      )}
+                      <p className="text-sm text-zinc-400 mt-2">
+                        {iWon ? "🦁 You won the series!" : `${winnerName} wins the series`}
+                      </p>
+                    </div>
+
+                    {/* Scoreboard */}
+                    <div className="p-6 space-y-2">
+                      {sorted.map(([profileId, score], i) => {
+                        const player = allPlayers.find(p => p.profile_id === profileId);
+                        const isChamp = i === 0;
+                        return (
+                          <motion.div
+                            key={profileId}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: 0.2 + i * 0.1 }}
+                            className="flex items-center justify-between rounded-xl px-4 py-3"
+                            style={{
+                              background: isChamp ? "rgba(16,185,129,0.12)" : "#1a1a1a",
+                              border: `1px solid ${isChamp ? "rgba(16,185,129,0.4)" : "#2a2a2a"}`,
+                            }}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span>{isChamp ? "🥇" : i === 1 ? "🥈" : "🥉"}</span>
+                              <div>
+                                <p className="font-bold text-sm text-white">
+                                  {player?.display_name ?? "Player"}
+                                  {profileId === currentProfile?.id ? " (You)" : ""}
+                                </p>
+                                <p className="text-[10px] text-zinc-500">
+                                  {isChamp ? "Series winner" : `${seriesTarget - (score as number)} win${seriesTarget - (score as number) === 1 ? "" : "s"} short`}
+                                </p>
+                              </div>
+                            </div>
+                            <span className="font-black text-xl" style={{ color: isChamp ? "#10b981" : "#71717a" }}>
+                              {score as number}
+                            </span>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="p-6 pt-2 flex gap-3">
+                      <button
+                        onClick={() => {
+                          handleStartGame(true); // reset wins — fresh series
+                        }}
+                        disabled={actionLoading}
+                        className="flex-1 rounded-xl py-3 text-sm font-black disabled:opacity-50"
+                        style={{ background: "linear-gradient(135deg, #059669, #10b981)", color: "white" }}
+                      >
+                        {actionLoading ? "Dealing…" : "🎲 New Series"}
+                      </button>
+                      <Link
+                        href="/play"
+                        className="rounded-xl px-4 py-3 text-sm font-bold text-zinc-400"
+                        style={{ background: "#1a1a1a", border: "1px solid #2a2a2a" }}
+                      >
+                        Leave
+                      </Link>
+                    </div>
+                  </motion.div>
+                </div>
+              );
+            })()
+
           ) : gamePhase === "gameOver" ? (
-            // ── GAME OVER ──────────────────────────────────────────────────
+            // ── HAND OVER (series still in progress) ──────────────────────
             <div className="flex flex-1 items-center justify-center p-6">
               <motion.div
                 initial={{ scale: 0.9, opacity: 0 }}
@@ -1708,15 +1815,18 @@ export default function GameClient({ room, currentProfile }: Props) {
                 style={{ background: "#111111", borderColor: "#222222" }}
               >
                 <div className="p-6 text-center border-b" style={{ borderColor: "#222222" }}>
-                  <div className="text-5xl mb-3">🏆</div>
-                  <h2 className="text-2xl font-black text-white">GAME OVER</h2>
-                  <p className="text-sm text-zinc-500 mt-1">Final Scores</p>
+                  <div className="text-5xl mb-3">🀱</div>
+                  <h2 className="text-2xl font-black text-white">HAND WON</h2>
+                  <p className="text-sm text-zinc-500 mt-1">
+                    Series — first to {room.points_to_win ?? 6} wins
+                  </p>
                 </div>
                 <div className="p-6 space-y-2">
                   {Object.entries(session?.scores ?? {})
                     .sort((a, b) => (b[1] as number) - (a[1] as number))
                     .map(([profileId, score], i) => {
                       const player = allPlayers.find((p) => p.profile_id === profileId);
+                      const target = room.points_to_win ?? 6;
                       return (
                         <motion.div
                           key={profileId}
@@ -1725,8 +1835,8 @@ export default function GameClient({ room, currentProfile }: Props) {
                           transition={{ delay: i * 0.1 }}
                           className="flex items-center justify-between rounded-xl px-4 py-3"
                           style={{
-                            background: i === 0 ? "rgba(217,119,6,0.15)" : "#1a1a1a",
-                            border: `1px solid ${i === 0 ? "rgba(217,119,6,0.4)" : "#2a2a2a"}`,
+                            background: i === 0 ? "rgba(217,119,6,0.12)" : "#1a1a1a",
+                            border: `1px solid ${i === 0 ? "rgba(217,119,6,0.35)" : "#2a2a2a"}`,
                           }}
                         >
                           <div className="flex items-center gap-3">
@@ -1736,12 +1846,19 @@ export default function GameClient({ room, currentProfile }: Props) {
                               {profileId === currentProfile?.id ? " (You)" : ""}
                             </span>
                           </div>
-                          <span
-                            className="font-black text-sm"
-                            style={{ color: i === 0 ? "#f59e0b" : "#10b981" }}
-                          >
-                            {score as number} pts
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {/* Mini progress pips */}
+                            <div className="flex gap-0.5">
+                              {Array.from({ length: target }).map((_, j) => (
+                                <div key={j} className="w-2 h-2 rounded-full"
+                                  style={{ background: j < (score as number) ? "#f59e0b" : "#2a2a2a" }} />
+                              ))}
+                            </div>
+                            <span className="font-black text-sm w-6 text-right"
+                              style={{ color: i === 0 ? "#f59e0b" : "#10b981" }}>
+                              {score as number}
+                            </span>
+                          </div>
                         </motion.div>
                       );
                     })}
@@ -1751,7 +1868,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                   <div className="px-6 pb-2">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs text-zinc-500">
-                        {autoRestartCount > 0 ? "New game starting in…" : "Shuffling…"}
+                        {autoRestartCount > 0 ? "Next hand in…" : "Dealing…"}
                       </span>
                       <span className="text-xs font-black text-amber-400">
                         {autoRestartCount > 0 ? `${autoRestartCount}s` : "🎲"}
@@ -1768,7 +1885,6 @@ export default function GameClient({ room, currentProfile }: Props) {
                 <div className="p-6 pt-2 flex gap-3">
                   <button
                     onClick={() => {
-                      // Cancel countdown and start immediately
                       if (autoRestartRef.current) {
                         clearInterval(autoRestartRef.current);
                         autoRestartRef.current = null;
@@ -1780,7 +1896,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                     className="flex-1 rounded-xl py-3 text-sm font-black disabled:opacity-50"
                     style={{ background: "linear-gradient(135deg, #d97706, #f59e0b)", color: "#1a0a00" }}
                   >
-                    {actionLoading ? "Shuffling…" : "🎲 Play Again Now"}
+                    {actionLoading ? "Dealing…" : "🎲 Deal Now"}
                   </button>
                   <Link
                     href="/play"
@@ -1998,7 +2114,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                   >
                     {myHand.length === 0 ? (
                       <motion.button
-                        onClick={handleStartGame}
+                        onClick={() => handleStartGame()}
                         disabled={actionLoading}
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
