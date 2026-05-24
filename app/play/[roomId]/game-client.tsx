@@ -540,7 +540,8 @@ export default function GameClient({ room, currentProfile }: Props) {
             consecutive_passes: s.consecutive_passes ?? 0,
           };
           setSession(mapped);
-          if (s.status === "finished") setGamePhase("gameOver");
+          if (s.status === "series_over") setGamePhase("seriesOver");
+          else if (s.status === "finished") setGamePhase("gameOver");
           else if (s.status === "active") setGamePhase("playing");
         }
       )
@@ -1006,15 +1007,17 @@ export default function GameClient({ room, currentProfile }: Props) {
         newScores[currentProfile.id] = (newScores[currentProfile.id] ?? 0) + 1;
       }
 
-      // Check if series is now won
-      const myNewWins   = newScores[currentProfile.id] ?? 0;
-      const seriesWon   = myNewWins >= seriesTarget;
+      // Check if series is now won — check the winning team's score, not just this player
+      const maxNewWins  = Math.max(...Object.values(newScores).map(v => v as number));
+      const seriesWon   = maxNewWins >= seriesTarget;
+      const dbStatus    = seriesWon ? "series_over" : "finished";
       const nextPhase: GamePhase = seriesWon ? "seriesOver" : "gameOver";
 
-      // Store winner as current_turn so next hand knows who plays first
+      // Store winner as current_turn so next hand knows who plays first.
+      // Use "series_over" status so ALL clients get the correct phase via realtime.
       await supabase.from("game_sessions").update({
         board, left_end: lEnd, right_end: rEnd, current_turn: currentProfile.id,
-        scores: newScores, status: "finished", consecutive_passes: 0,
+        scores: newScores, status: dbStatus, consecutive_passes: 0,
         updated_at: new Date().toISOString(),
       }).eq("id", session.id);
       await supabase.from("game_rooms").update({ status: "finished" }).eq("id", room.id);
@@ -1091,24 +1094,37 @@ export default function GameClient({ room, currentProfile }: Props) {
       if (results[0]) {
         const isTeams = gameMode === "teams";
         if (isTeams) {
-          const winnerPlayer = allPlayers.find(p => p.profile_id === results[0].playerId);
-          const winnerSeat   = winnerPlayer?.seat ?? 0;
+          // ── Correct teams blocked winner: lowest COMBINED pip total per team ──
+          const teamPips: Record<number, number> = {};
+          results.forEach(r => {
+            const player = allPlayers.find(p => p.profile_id === r.playerId);
+            const teamIdx = (player?.seat ?? 0) % 2;
+            teamPips[teamIdx] = (teamPips[teamIdx] ?? 0) + r.remainingPips;
+          });
+          const winningTeam = Object.entries(teamPips)
+            .sort((a, b) => Number(a[1]) - Number(b[1]))[0];
+          const winningTeamIdx = Number(winningTeam?.[0] ?? 0);
           allPlayers
-            .filter(p => p.seat % 2 === winnerSeat % 2)
+            .filter(p => (p.seat % 2) === winningTeamIdx)
             .forEach(p => { newScores[p.profile_id] = (newScores[p.profile_id] ?? 0) + 1; });
+          // Update blockWinnerId to a player on the winning team (for current_turn tracking)
+          const winningTeamPlayer = allPlayers.find(p => (p.seat % 2) === winningTeamIdx);
+          if (winningTeamPlayer) results[0] = { ...results[0], playerId: winningTeamPlayer.profile_id, isWinner: true };
         } else {
           newScores[results[0].playerId] = (newScores[results[0].playerId] ?? 0) + 1;
         }
       }
 
-      // Check series win
-      const blockWinnerNewScore = newScores[blockWinnerId] ?? 0;
-      const blockSeriesWon = blockWinnerNewScore >= seriesTarget;
+      // Check series win — use max score across all players
+      const blockMaxWins = Math.max(...Object.values(newScores).map(v => v as number));
+      const blockSeriesWon = blockMaxWins >= seriesTarget;
+      const blockDbStatus = blockSeriesWon ? "series_over" : "finished";
 
-      // Store winner as current_turn so next round knows who plays first
+      // Store winner as current_turn so next round knows who plays first.
+      // Use "series_over" status so ALL clients get the correct phase via realtime.
       await supabase.from("game_sessions").update({
-        current_turn: blockWinnerId, consecutive_passes: newPasses, scores: newScores,
-        status: "finished", updated_at: new Date().toISOString(),
+        current_turn: results[0]?.playerId ?? blockWinnerId, consecutive_passes: newPasses,
+        scores: newScores, status: blockDbStatus, updated_at: new Date().toISOString(),
       }).eq("id", session.id);
       await supabase.from("game_rooms").update({ status: "finished" }).eq("id", room.id);
       setGamePhase(blockSeriesWon ? "seriesOver" : "blocked");
@@ -1257,7 +1273,7 @@ export default function GameClient({ room, currentProfile }: Props) {
         ) : (
           <PlayerAvatar
             name={player.display_name}
-            score={player.score ?? 0}
+            score={(session?.scores as Record<string,number>)?.[player.profile_id] ?? 0}
             isActive={isActive}
             tileCount={player.tile_count ?? player.hand?.length ?? 0}
             size={28}
@@ -1614,7 +1630,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-black text-white truncate">{(currentProfile.full_name ?? currentProfile.display_name ?? "Lion").split(" ")[0]}</p>
-                  <p className="text-[10px]" style={{ color: "#f59e0b" }}>{myPlayer?.score ?? 0} pts</p>
+                  <p className="text-[10px]" style={{ color: "#f59e0b" }}>{(session?.scores as Record<string,number>)?.[currentProfile.id] ?? 0} wins</p>
                 </div>
                 <div className="shrink-0 flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-black"
                   style={{ background: "linear-gradient(135deg, #d97706, #92400e)", color: "#1a0a00" }}>
@@ -1942,13 +1958,39 @@ export default function GameClient({ room, currentProfile }: Props) {
             // ── SERIES OVER ─────────────────────────────────────────────────
             (() => {
               const seriesTarget = room.points_to_win ?? 6;
-              const sorted = Object.entries(session?.scores ?? {})
-                .sort((a, b) => (b[1] as number) - (a[1] as number));
-              const topScore   = (sorted[0]?.[1] as number) ?? 0;
-              const runnerScore = (sorted[1]?.[1] as number) ?? 0;
-              const isLove     = runnerScore === 0;
-              const winnerName = allPlayers.find(p => p.profile_id === sorted[0]?.[0])?.display_name ?? "Winner";
-              const iWon       = sorted[0]?.[0] === currentProfile?.id;
+              const isTeamsMode  = gameMode === "teams";
+              const scores       = (session?.scores ?? {}) as Record<string, number>;
+
+              // Build team-aware scoreboard entries
+              type ScoreEntry = { label: string; wins: number; profileIds: string[]; isMyTeam: boolean };
+              let scoreEntries: ScoreEntry[];
+              if (isTeamsMode) {
+                // Group by team (seat % 2)
+                const teams: Record<number, { players: typeof allPlayers; wins: number }> = { 0: { players: [], wins: 0 }, 1: { players: [], wins: 0 } };
+                allPlayers.forEach(p => {
+                  const t = (p.seat % 2) as 0 | 1;
+                  teams[t].players.push(p);
+                  teams[t].wins = scores[p.profile_id] ?? 0; // both partners share same wins
+                });
+                scoreEntries = [0, 1].map(t => ({
+                  label: teams[t].players.map(p => p.display_name.split(" ")[0]).join(" & "),
+                  wins: teams[t].wins,
+                  profileIds: teams[t].players.map(p => p.profile_id),
+                  isMyTeam: teams[t].players.some(p => p.profile_id === currentProfile?.id),
+                })).sort((a, b) => b.wins - a.wins);
+              } else {
+                const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+                scoreEntries = sorted.map(([id, wins]) => {
+                  const player = allPlayers.find(p => p.profile_id === id);
+                  return { label: player?.display_name ?? "Player", wins, profileIds: [id], isMyTeam: id === currentProfile?.id };
+                });
+              }
+
+              const topScore    = scoreEntries[0]?.wins ?? 0;
+              const runnerScore = scoreEntries[1]?.wins ?? 0;
+              const isLove      = runnerScore === 0;
+              const winnerName  = scoreEntries[0]?.label ?? "Winner";
+              const iWon        = scoreEntries[0]?.isMyTeam ?? false;
               return (
                 <div className="flex flex-1 items-center justify-center p-6">
                   <motion.div
@@ -1987,12 +2029,12 @@ export default function GameClient({ room, currentProfile }: Props) {
 
                     {/* Scoreboard */}
                     <div className="p-6 space-y-2">
-                      {sorted.map(([profileId, score], i) => {
-                        const player = allPlayers.find(p => p.profile_id === profileId);
+                      {scoreEntries.map((entry, i) => {
                         const isChamp = i === 0;
+                        const medals  = ["🥇", "🥈", "🥉", "4️⃣"];
                         return (
                           <motion.div
-                            key={profileId}
+                            key={entry.label}
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: 0.2 + i * 0.1 }}
@@ -2003,19 +2045,19 @@ export default function GameClient({ room, currentProfile }: Props) {
                             }}
                           >
                             <div className="flex items-center gap-3">
-                              <span>{isChamp ? "🥇" : i === 1 ? "🥈" : "🥉"}</span>
+                              <span>{medals[i] ?? "·"}</span>
                               <div>
                                 <p className="font-bold text-sm text-white">
-                                  {player?.display_name ?? "Player"}
-                                  {profileId === currentProfile?.id ? " (You)" : ""}
+                                  {entry.label}
+                                  {entry.isMyTeam ? " (You)" : ""}
                                 </p>
                                 <p className="text-[10px] text-zinc-500">
-                                  {isChamp ? "Series winner" : `${seriesTarget - (score as number)} win${seriesTarget - (score as number) === 1 ? "" : "s"} short`}
+                                  {isChamp ? "Series winner" : `${seriesTarget - entry.wins} win${seriesTarget - entry.wins === 1 ? "" : "s"} short`}
                                 </p>
                               </div>
                             </div>
                             <span className="font-black text-xl" style={{ color: isChamp ? "#10b981" : "#71717a" }}>
-                              {score as number}
+                              {entry.wins}
                             </span>
                           </motion.div>
                         );
@@ -2299,7 +2341,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                     {currentProfile && (
                       <PlayerAvatar
                         name={currentProfile.full_name ?? currentProfile.display_name ?? "Lion"}
-                        score={myPlayer?.score ?? 0}
+                        score={(session?.scores as Record<string,number>)?.[currentProfile?.id ?? ""] ?? 0}
                         isActive={isMyTurn}
                         tileCount={myHand.length}
                         isMe
@@ -2816,9 +2858,9 @@ export default function GameClient({ room, currentProfile }: Props) {
                       {player && (
                         <div className="flex flex-col items-end">
                           <span className="text-xs font-black" style={{ color: "#10b981" }}>
-                            {player.score ?? 0}
+                            {(session?.scores as Record<string,number>)?.[player.profile_id] ?? 0}
                           </span>
-                          <span className="text-[9px]" style={{ color: "#52525b" }}>pts</span>
+                          <span className="text-[9px]" style={{ color: "#52525b" }}>wins</span>
                         </div>
                       )}
                     </div>
