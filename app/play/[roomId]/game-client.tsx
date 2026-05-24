@@ -809,8 +809,11 @@ export default function GameClient({ room, currentProfile }: Props) {
     }
     const scores: Record<string, number> = {};
     allProfileIds.forEach((id) => {
-      // resetScores = true when starting a fresh series; otherwise carry wins forward
-      scores[id] = resetScores ? 0 : (seatedPlayers.find((p) => p.profile_id === id)?.score ?? 0);
+      // resetScores = true  → new series, start from 0.
+      // resetScores = false → carry wins forward from session.scores (the JSONB source
+      //   of truth for series wins). Do NOT read game_players.score — that column is
+      //   never updated with wins and would wrongly reset the tally every hand.
+      scores[id] = resetScores ? 0 : ((session?.scores as Record<string, number>)?.[id] ?? 0);
     });
 
     const newSession: GameSession = {
