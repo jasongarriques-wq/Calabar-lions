@@ -151,7 +151,7 @@ export type Comment = {
 // ── Domino Game Types ──────────────────────────────────────────────────────────
 
 export type DominoTile = [number, number];
-export type PlacedTile = { tile: DominoTile; flipped: boolean };
+export type PlacedTile = { tile: DominoTile; flipped: boolean; arm?: "left" | "right" | "top" | "bottom" };
 
 export type GameMode = 'draw' | 'teams' | 'french' | 'nine-nine';
 export type TableStatus = 'waiting' | 'playing' | 'blocked' | 'finished';

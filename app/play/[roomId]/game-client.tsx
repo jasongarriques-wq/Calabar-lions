@@ -51,22 +51,63 @@ function dealTiles(playerCount: number, mode: GameMode) {
   return { hands, boneyard };
 }
 
-function canPlayTile(
+// ── 4-arm game helpers ──────────────────────────────────────────────────────
+
+/** Returns which arms a tile can play on. "first" = empty board. */
+function canPlayEnds(
   tile: DominoTile,
   leftEnd: number | null,
-  rightEnd: number | null
-): "left" | "right" | "both" | "none" | "first" {
+  rightEnd: number | null,
+  topEnd: number | null,
+  bottomEnd: number | null
+): Array<"left" | "right" | "top" | "bottom"> | "first" | "none" {
   if (leftEnd === null) return "first";
-  const matchLeft = tile[0] === leftEnd || tile[1] === leftEnd;
-  const matchRight = tile[0] === rightEnd || tile[1] === rightEnd;
-  if (matchLeft && matchRight) return "both";
-  if (matchLeft) return "left";
-  if (matchRight) return "right";
-  return "none";
+  const v0 = tile[0], v1 = tile[1];
+  const matches: Array<"left" | "right" | "top" | "bottom"> = [];
+  if (leftEnd   !== null && (v0 === leftEnd   || v1 === leftEnd))   matches.push("left");
+  if (rightEnd  !== null && (v0 === rightEnd  || v1 === rightEnd))  matches.push("right");
+  if (topEnd    !== null && (v0 === topEnd    || v1 === topEnd))    matches.push("top");
+  if (bottomEnd !== null && (v0 === bottomEnd || v1 === bottomEnd)) matches.push("bottom");
+  return matches.length > 0 ? matches : "none";
 }
 
+function canPlay4(
+  tile: DominoTile,
+  leftEnd: number | null,
+  rightEnd: number | null,
+  topEnd: number | null,
+  bottomEnd: number | null
+): boolean {
+  const r = canPlayEnds(tile, leftEnd, rightEnd, topEnd, bottomEnd);
+  return r !== "none";
+}
+
+// Keep old 2-end helpers for legacy compatibility
+function canPlayTile(tile: DominoTile, leftEnd: number | null, rightEnd: number | null) {
+  if (leftEnd === null) return "first" as const;
+  const matchLeft  = tile[0] === leftEnd  || tile[1] === leftEnd;
+  const matchRight = tile[0] === rightEnd || tile[1] === rightEnd;
+  if (matchLeft && matchRight) return "both" as const;
+  if (matchLeft) return "left" as const;
+  if (matchRight) return "right" as const;
+  return "none" as const;
+}
 function canPlay(tile: DominoTile, leftEnd: number | null, rightEnd: number | null): boolean {
   return canPlayTile(tile, leftEnd, rightEnd) !== "none";
+}
+
+/** Compute the exposed pip at the tip of a given arm, starting from spinnerValue. */
+function computeArmEnd(
+  armTiles: PlacedTile[],
+  spinnerValue: number,
+  convention: "left" | "right"   // "left" = top/left arms, "right" = bottom/right arms
+): number {
+  if (armTiles.length === 0) return spinnerValue;
+  const last = armTiles[armTiles.length - 1];
+  // left-convention: flipped=true→tile[1] exposed; flipped=false→tile[0] exposed
+  // right-convention: flipped=false→tile[1] exposed; flipped=true→tile[0] exposed
+  if (convention === "left") return last.flipped ? last.tile[1] : last.tile[0];
+  return last.flipped ? last.tile[0] : last.tile[1];
 }
 
 function pipSum(tile: DominoTile) {
@@ -266,10 +307,23 @@ export default function GameClient({ room, currentProfile }: Props) {
   // ── Derived state ──────────────────────────────────────────────────────────
 
   const isMyTurn = session?.current_turn === currentProfile?.id;
-  const myHand = myPlayer?.hand ?? [];
-  const leftEnd = session?.left_end ?? null;
+  const myHand   = myPlayer?.hand ?? [];
+  const leftEnd  = session?.left_end  ?? null;
   const rightEnd = session?.right_end ?? null;
-  const playable = myHand.map((t) => canPlay(t, leftEnd, rightEnd));
+
+  // ── Spinner / 4-arm derived values ────────────────────────────────────────
+  const boardTiles   = session?.board ?? [];
+  // Spinner = first double in board (any arm)
+  const spinnerTile  = boardTiles.find(t => t.tile[0] === t.tile[1] && t.arm !== undefined);
+  const spinnerValue = spinnerTile ? spinnerTile.tile[0] : null;
+  const hasSpinner   = spinnerValue !== null;
+
+  const topArm    = boardTiles.filter(t => t.arm === "top");
+  const bottomArm = boardTiles.filter(t => t.arm === "bottom");
+  const topEnd    = hasSpinner ? computeArmEnd(topArm,    spinnerValue!, "left")  : null;
+  const bottomEnd = hasSpinner ? computeArmEnd(bottomArm, spinnerValue!, "right") : null;
+
+  const playable    = myHand.map(t => canPlay4(t, leftEnd, rightEnd, topEnd, bottomEnd));
   const hasPlayable = playable.some(Boolean);
   const boneyardEmpty = (session?.boneyard?.length ?? 0) === 0;
   const gameMode: GameMode = (room.game_mode as GameMode) ?? "draw";
@@ -281,18 +335,20 @@ export default function GameClient({ room, currentProfile }: Props) {
     return a.seat - b.seat;
   });
 
-  const me = orderedPlayers[0] ?? null;
-  const opponentLeft = orderedPlayers[1] ?? null;
-  const opponentTop = orderedPlayers[2] ?? null;
-  const opponentRight = orderedPlayers[3] ?? null;
-  const isHost = room.created_by === currentProfile?.id;
-  const alreadySeated = allPlayers.some((p) => p.profile_id === currentProfile?.id);
+  const me             = orderedPlayers[0] ?? null;
+  const opponentLeft   = orderedPlayers[1] ?? null;
+  const opponentTop    = orderedPlayers[2] ?? null;
+  const opponentRight  = orderedPlayers[3] ?? null;
+  const isHost         = room.created_by === currentProfile?.id;
+  const alreadySeated  = allPlayers.some(p => p.profile_id === currentProfile?.id);
 
   const selectedTileObj = selectedTile !== null ? myHand[selectedTile] : null;
-  const canPlayEnd =
-    selectedTileObj && session
-      ? canPlayTile(selectedTileObj, leftEnd, rightEnd)
-      : null;
+  // All arms the selected tile can play on
+  const selectedPlayEnds = selectedTileObj && session
+    ? canPlayEnds(selectedTileObj, leftEnd, rightEnd, topEnd, bottomEnd)
+    : null;
+  const canPlayAny   = selectedPlayEnds !== null && selectedPlayEnds !== "none";
+  const needsChoice  = Array.isArray(selectedPlayEnds) && selectedPlayEnds.length > 1;
 
   // ── Load initial data ──────────────────────────────────────────────────────
 
@@ -655,66 +711,94 @@ export default function GameClient({ room, currentProfile }: Props) {
     setActionLoading(false);
   }
 
-  async function handlePlayTile(end: "left" | "right" | "auto", explicitIdx?: number) {
-    // Accept either an explicit tile index (from double-click / drag) or fall back to selected
+  async function handlePlayTile(end: "left" | "right" | "top" | "bottom" | "auto", explicitIdx?: number) {
     const tileIdx = explicitIdx ?? selectedTile;
     if (!session || !myPlayer || tileIdx === null || !currentProfile) return;
     if (!isMyTurn) { showToast("It's not your turn!"); return; }
 
-    const tile = myHand[tileIdx];
-    const playResult = canPlayTile(tile, session.left_end, session.right_end);
-    if (playResult === "none") { showToast("That tile can't be played here!"); return; }
+    const tile    = myHand[tileIdx];
+    const matches = canPlayEnds(tile, leftEnd, rightEnd, topEnd, bottomEnd);
+    if (matches === "none") { showToast("That tile can't be played here!"); return; }
 
     setActionLoading(true);
 
     const board = [...(session.board ?? [])];
     let lEnd = session.left_end;
     let rEnd = session.right_end;
+    let tEnd = topEnd;
+    let bEnd = bottomEnd;
     let flipped = false;
+    let arm: PlacedTile["arm"];
 
     if (lEnd === null) {
-      // First tile
-      board.push({ tile, flipped: false });
-      lEnd = tile[0];
-      rEnd = tile[1];
+      // ── First tile ever ──────────────────────────────────────────────────
+      arm    = "right";
+      lEnd   = tile[0];
+      rEnd   = tile[1];
+      // If first tile is a double, open spinner immediately
+      if (tile[0] === tile[1]) { tEnd = tile[0]; bEnd = tile[0]; }
+      board.push({ tile, flipped: false, arm });
     } else {
-      let playSide = end;
-      if (playSide === "auto") {
-        if (tile[0] === rEnd || tile[1] === rEnd) playSide = "right";
-        else playSide = "left";
+      // ── Determine which end ──────────────────────────────────────────────
+      let playSide: "left" | "right" | "top" | "bottom";
+      if (end === "auto") {
+        if (matches === "first") { showToast("Board error"); setActionLoading(false); return; }
+        playSide = (matches as Array<"left"|"right"|"top"|"bottom">)[0];
+      } else {
+        playSide = end;
+        // Validate
+        if (Array.isArray(matches) && !matches.includes(playSide)) {
+          showToast("That tile doesn't match that end!"); setActionLoading(false); return;
+        }
       }
 
       if (playSide === "right") {
-        if (tile[0] === rEnd) { flipped = false; rEnd = tile[1]; }
-        else if (tile[1] === rEnd) { flipped = true; rEnd = tile[0]; }
-        else if (tile[0] === lEnd) { flipped = true; lEnd = tile[1]; playSide = "left"; }
-        else { flipped = false; lEnd = tile[0]; playSide = "left"; }
-        if (playSide === "right") board.push({ tile, flipped });
-        else board.unshift({ tile, flipped });
-      } else {
-        if (tile[0] === lEnd) { flipped = true; lEnd = tile[1]; }
-        else if (tile[1] === lEnd) { flipped = false; lEnd = tile[0]; }
-        else if (tile[0] === rEnd) { flipped = false; rEnd = tile[1]; }
-        else { flipped = true; rEnd = tile[0]; }
-        board.unshift({ tile, flipped });
+        if (tile[0] === rEnd!) { flipped = false; rEnd = tile[1]; }
+        else                   { flipped = true;  rEnd = tile[0]; }
+        arm = "right";
+        board.push({ tile, flipped, arm });
+      } else if (playSide === "left") {
+        if (tile[0] === lEnd!) { flipped = true;  lEnd = tile[1]; }
+        else                   { flipped = false; lEnd = tile[0]; }
+        arm = "left";
+        board.unshift({ tile, flipped, arm });
+      } else if (playSide === "top") {
+        if (tEnd === null) { showToast("Top not open yet!"); setActionLoading(false); return; }
+        // Top arm uses left-convention: tile[0]===end → flipped=true, newEnd=tile[1]
+        if (tile[0] === tEnd) { flipped = true;  tEnd = tile[1]; }
+        else                  { flipped = false; tEnd = tile[0]; }
+        arm = "top";
+        board.push({ tile, flipped, arm });
+      } else { // bottom
+        if (bEnd === null) { showToast("Bottom not open yet!"); setActionLoading(false); return; }
+        // Bottom arm uses right-convention: tile[0]===end → flipped=false, newEnd=tile[1]
+        if (tile[0] === bEnd) { flipped = false; bEnd = tile[1]; }
+        else                  { flipped = true;  bEnd = tile[0]; }
+        arm = "bottom";
+        board.push({ tile, flipped, arm });
+      }
+
+      // ── Spinner: first double played opens top/bottom ────────────────────
+      if (tile[0] === tile[1] && !hasSpinner && (playSide === "left" || playSide === "right")) {
+        tEnd = tile[0];
+        bEnd = tile[0];
+        // Mark this tile as the spinner by ensuring arm is set (already set above)
       }
     }
 
-    const newHand = myHand.filter((_, i) => i !== tileIdx);
-    const nextTurn = getNextTurn(allPlayers, currentProfile.id);
+    const newHand   = myHand.filter((_, i) => i !== tileIdx);
+    const nextTurn  = getNextTurn(allPlayers, currentProfile.id);
     const newScores = { ...(session.scores ?? {}) };
 
     await supabase.from("game_players").update({ hand: newHand }).eq("id", myPlayer.id);
     setLastPlacedIdx(board.length - 1);
 
     if (newHand.length === 0) {
-      // Won! Calculate round score
       const roundScore = allPlayers.reduce((sum, p) => {
         if (p.profile_id === currentProfile.id) return sum;
         return sum + calculatePips(p.hand ?? []);
       }, 0);
       newScores[currentProfile.id] = (newScores[currentProfile.id] ?? 0) + roundScore;
-
       await supabase.from("game_sessions").update({
         board, left_end: lEnd, right_end: rEnd, current_turn: nextTurn,
         scores: newScores, status: "finished", consecutive_passes: 0,
@@ -819,15 +903,13 @@ export default function GameClient({ room, currentProfile }: Props) {
 
   function handleDoubleClickTile(i: number) {
     if (!isMyTurn) return;
-    const tile = myHand[i];
-    const result = canPlayTile(tile, leftEnd, rightEnd);
-    if (result === "none") { showToast("That tile can't be played here!"); return; }
-    if (result === "both") {
-      // Both ends match — show end choices
+    const tile    = myHand[i];
+    const matches = canPlayEnds(tile, leftEnd, rightEnd, topEnd, bottomEnd);
+    if (matches === "none") { showToast("That tile can't be played here!"); return; }
+    if (Array.isArray(matches) && matches.length > 1) {
       setSelectedTile(i);
       setShowEndChoices(true);
     } else {
-      // Single valid end — play immediately
       setSelectedTile(i);
       handlePlayTile("auto", i);
     }
@@ -862,16 +944,21 @@ export default function GameClient({ room, currentProfile }: Props) {
     if (!isMyTurn) return;
     const idx = parseInt(e.dataTransfer.getData("tileIdx"), 10);
     if (isNaN(idx) || idx < 0 || idx >= myHand.length) return;
-    const tile = myHand[idx];
-    const result = canPlayTile(tile, leftEnd, rightEnd);
-    if (result === "none") { showToast("That tile can't play here!"); setDraggedTileIdx(null); return; }
-    if (result === "both") {
-      // Determine end from horizontal drop position
+    const tile    = myHand[idx];
+    const matches = canPlayEnds(tile, leftEnd, rightEnd, topEnd, bottomEnd);
+    if (matches === "none") { showToast("That tile can't play here!"); setDraggedTileIdx(null); return; }
+
+    if (Array.isArray(matches) && matches.length > 1) {
+      // Determine arm from drop position relative to board center
       const rect = e.currentTarget.getBoundingClientRect();
-      const relX = e.clientX - rect.left;
-      const side: "left" | "right" = relX < rect.width / 2 ? "left" : "right";
+      const relX = e.clientX - rect.left - rect.width  / 2;
+      const relY = e.clientY - rect.top  - rect.height / 2;
+      const preferH = Math.abs(relX) >= Math.abs(relY);
+      let preferred: "left" | "right" | "top" | "bottom" =
+        preferH ? (relX < 0 ? "left" : "right") : (relY < 0 ? "top" : "bottom");
+      if (!matches.includes(preferred)) preferred = matches[0];
       setSelectedTile(idx);
-      handlePlayTile(side, idx);
+      handlePlayTile(preferred, idx);
     } else {
       setSelectedTile(idx);
       handlePlayTile("auto", idx);
@@ -959,51 +1046,105 @@ export default function GameClient({ room, currentProfile }: Props) {
     if (!session?.board || session.board.length === 0) {
       return (
         <div className="flex items-center justify-center h-full">
-          <p
-            className="text-sm font-bold opacity-30"
-            style={{ color: "#1a6b3a" }}
-          >
+          <p className="text-sm font-bold opacity-30" style={{ color: "#1a6b3a" }}>
             Play the first tile to start
           </p>
         </div>
       );
     }
 
+    const board = session.board;
+
+    // ── Identify arms ─────────────────────────────────────────────────────
+    const spinner = board.find(t => t.tile[0] === t.tile[1] && t.arm !== undefined);
+    const leftArm  = board.filter(t => t.arm === "left");
+    const rightArm = board.filter(t => t.arm === "right" && t !== spinner);
+    const topArm   = board.filter(t => t.arm === "top");
+    const botArm   = board.filter(t => t.arm === "bottom");
+
+    // Before spinner: show as a single horizontal chain (legacy linear mode)
+    if (!spinner) {
+      return (
+        <div ref={boardRef} className="flex items-center gap-0.5 overflow-x-auto px-4" style={{ scrollbarWidth: "none" }}>
+          {leftEnd !== null && (
+            <div className="shrink-0 rounded-lg px-2 py-1 text-xs font-black mr-1"
+              style={{ background: "rgba(16,185,129,0.2)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
+              {leftEnd}
+            </div>
+          )}
+          {board.map((pt, i) => (
+            <DominoTileComponent key={i} tile={pt.flipped ? [pt.tile[1], pt.tile[0]] : pt.tile}
+              horizontal size={30} justPlaced={i === lastPlacedIdx} />
+          ))}
+          {rightEnd !== null && (
+            <div className="shrink-0 rounded-lg px-2 py-1 text-xs font-black ml-1"
+              style={{ background: "rgba(16,185,129,0.2)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
+              {rightEnd}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Cross layout ──────────────────────────────────────────────────────
+    const renderTile = (pt: PlacedTile, i: number, horizontal: boolean) => (
+      <DominoTileComponent key={i}
+        tile={pt.flipped ? [pt.tile[1], pt.tile[0]] : pt.tile}
+        horizontal={horizontal}
+        size={28}
+        justPlaced={session.board.indexOf(pt) === lastPlacedIdx}
+      />
+    );
+
+    // Pip end label helper
+    const endLabel = (val: number) => (
+      <div className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-black"
+        style={{ background: "rgba(16,185,129,0.2)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
+        {val}
+      </div>
+    );
+
     return (
-      <div
-        ref={boardRef}
-        className="flex items-center gap-0.5 overflow-x-auto px-4"
-        style={{ scrollbarWidth: "none" }}
-      >
-        {/* Left end pip indicator */}
-        {session.left_end !== null && (
-          <div
-            className="shrink-0 rounded-lg px-2 py-1 text-xs font-black mr-1"
-            style={{ background: "rgba(16,185,129,0.2)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}
-          >
-            {session.left_end}
-          </div>
-        )}
+      <div className="flex flex-col items-center gap-0.5 overflow-auto" style={{ maxHeight: "100%", maxWidth: "100%", scrollbarWidth: "none" }}>
 
-        {session.board.map((pt: PlacedTile, i: number) => (
+        {/* ── Top arm (extends upward, flex-col-reverse puts first tile closest to spinner) ── */}
+        <div className="flex flex-col-reverse items-center gap-0.5">
+          {topEnd !== null && topArm.length === 0 && endLabel(topEnd)}
+          {topArm.length > 0 && endLabel(topEnd!)}
+          {topArm.map((pt, i) => renderTile(pt, i, false))}
+        </div>
+
+        {/* ── Middle row: left arm + spinner + right arm ── */}
+        <div className="flex items-center gap-0.5">
+          {/* Left arm — tiles displayed in reverse so first is closest to spinner */}
+          <div className="flex flex-row-reverse items-center gap-0.5">
+            {leftEnd !== null && leftArm.length === 0 && endLabel(leftEnd)}
+            {leftArm.length > 0 && endLabel(leftEnd!)}
+            {leftArm.map((pt, i) => renderTile(pt, i, true))}
+          </div>
+
+          {/* Spinner — displayed perpendicular (vertical) to open the cross */}
           <DominoTileComponent
-            key={i}
-            tile={pt.flipped ? [pt.tile[1], pt.tile[0]] : pt.tile}
-            horizontal
+            tile={spinner.tile}
+            horizontal={false}
             size={30}
-            justPlaced={i === lastPlacedIdx}
+            justPlaced={session.board.indexOf(spinner) === lastPlacedIdx}
           />
-        ))}
 
-        {/* Right end pip indicator */}
-        {session.right_end !== null && (
-          <div
-            className="shrink-0 rounded-lg px-2 py-1 text-xs font-black ml-1"
-            style={{ background: "rgba(16,185,129,0.2)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}
-          >
-            {session.right_end}
+          {/* Right arm */}
+          <div className="flex flex-row items-center gap-0.5">
+            {rightArm.map((pt, i) => renderTile(pt, i, true))}
+            {rightEnd !== null && rightArm.length === 0 && endLabel(rightEnd)}
+            {rightArm.length > 0 && endLabel(rightEnd!)}
           </div>
-        )}
+        </div>
+
+        {/* ── Bottom arm ── */}
+        <div className="flex flex-col items-center gap-0.5">
+          {botArm.map((pt, i) => renderTile(pt, i, false))}
+          {bottomEnd !== null && botArm.length === 0 && endLabel(bottomEnd!)}
+          {botArm.length > 0 && endLabel(bottomEnd!)}
+        </div>
       </div>
     );
   }
@@ -1706,27 +1847,41 @@ export default function GameClient({ room, currentProfile }: Props) {
 
                   {/* End choice buttons */}
                   <AnimatePresence>
-                    {showEndChoices && selectedTile !== null && (
+                    {showEndChoices && selectedTile !== null && Array.isArray(selectedPlayEnds) && (
                       <motion.div
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: 8 }}
-                        className="flex justify-center gap-3 mb-2"
+                        className="flex flex-wrap justify-center gap-2 mb-2"
                       >
-                        <button
-                          onClick={() => { handlePlayTile("left"); setShowEndChoices(false); }}
-                          className="rounded-xl px-4 py-2 text-sm font-black text-white transition-all hover:scale-105"
-                          style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.5)" }}
-                        >
-                          ← Play Left
-                        </button>
-                        <button
-                          onClick={() => { handlePlayTile("right"); setShowEndChoices(false); }}
-                          className="rounded-xl px-4 py-2 text-sm font-black text-white transition-all hover:scale-105"
-                          style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.5)" }}
-                        >
-                          Play Right →
-                        </button>
+                        {selectedPlayEnds.includes("left") && (
+                          <button onClick={() => { handlePlayTile("left"); setShowEndChoices(false); }}
+                            className="rounded-xl px-4 py-2 text-sm font-black text-white transition-all hover:scale-105"
+                            style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.5)" }}>
+                            ← Left
+                          </button>
+                        )}
+                        {selectedPlayEnds.includes("top") && (
+                          <button onClick={() => { handlePlayTile("top"); setShowEndChoices(false); }}
+                            className="rounded-xl px-4 py-2 text-sm font-black text-white transition-all hover:scale-105"
+                            style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.5)" }}>
+                            ↑ Top
+                          </button>
+                        )}
+                        {selectedPlayEnds.includes("bottom") && (
+                          <button onClick={() => { handlePlayTile("bottom"); setShowEndChoices(false); }}
+                            className="rounded-xl px-4 py-2 text-sm font-black text-white transition-all hover:scale-105"
+                            style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.5)" }}>
+                            ↓ Bottom
+                          </button>
+                        )}
+                        {selectedPlayEnds.includes("right") && (
+                          <button onClick={() => { handlePlayTile("right"); setShowEndChoices(false); }}
+                            className="rounded-xl px-4 py-2 text-sm font-black text-white transition-all hover:scale-105"
+                            style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.5)" }}>
+                            Right →
+                          </button>
+                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -1782,9 +1937,9 @@ export default function GameClient({ room, currentProfile }: Props) {
               >
                 {/* Left: Play tile button */}
                 <div className="flex items-center gap-2 min-w-[120px]">
-                  {selectedTile !== null && isMyTurn && canPlayEnd && canPlayEnd !== "none" && !showEndChoices && (
+                  {selectedTile !== null && isMyTurn && canPlayAny && !showEndChoices && (
                     <>
-                      {canPlayEnd === "both" ? (
+                      {needsChoice ? (
                         <button
                           onClick={() => setShowEndChoices(true)}
                           disabled={actionLoading}
