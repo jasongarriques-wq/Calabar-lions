@@ -371,6 +371,7 @@ export default function GameClient({ room, currentProfile }: Props) {
 
   // Caribbean series-opening rule: the very first tile of a series MUST be [6,6].
   // Detected by: board is empty AND every player's score is still 0 (no hand won yet).
+  // Note: scores = {} (empty) at series start is correct — vacuously true is intentional.
   const isFirstMoveOfSeries =
     boardTiles.length === 0 &&
     Object.values(session?.scores ?? {}).every(s => (s as number) === 0);
@@ -447,7 +448,11 @@ export default function GameClient({ room, currentProfile }: Props) {
         consecutive_passes: s.consecutive_passes ?? 0,
       };
       setSession(mapped);
-      setGamePhase(s.status === "finished" ? "gameOver" : "playing");
+      setGamePhase(
+        s.status === "series_over" ? "seriesOver" :
+        s.status === "finished"    ? "gameOver"   :
+        "playing"
+      );
 
       // Now fetch players filtered by this session's id
       const { data: playersData } = await supabase
