@@ -1054,96 +1054,129 @@ export default function GameClient({ room, currentProfile }: Props) {
     }
 
     const board = session.board;
+    const spinner      = board.find(t => t.tile[0] === t.tile[1] && t.arm !== undefined);
+    const leftArm      = board.filter(t => t.arm === "left");
+    const rightArm     = board.filter(t => t.arm === "right" && t !== spinner);
+    const topArmTiles  = board.filter(t => t.arm === "top");
+    const botArmTiles  = board.filter(t => t.arm === "bottom");
 
-    // ── Identify arms ─────────────────────────────────────────────────────
-    const spinner = board.find(t => t.tile[0] === t.tile[1] && t.arm !== undefined);
-    const leftArm  = board.filter(t => t.arm === "left");
-    const rightArm = board.filter(t => t.arm === "right" && t !== spinner);
-    const topArm   = board.filter(t => t.arm === "top");
-    const botArm   = board.filter(t => t.arm === "bottom");
+    // ── Layout constants ─────────────────────────────────────────────────────
+    const HALF    = 20;            // half-tile size (each pip square)
+    const PER_ROW = 6;             // tiles per snake row
+    const G       = 2;             // gap between tiles (px)
+    const HW      = HALF * 2 + 1; // horizontal tile width  = 41 px
+    const HH      = HALF;          // horizontal tile height = 20 px
+    const VW      = HALF;          // vertical   tile width  = 20 px
 
-    // Before spinner: show as a single horizontal chain (legacy linear mode)
-    if (!spinner) {
-      return (
-        <div ref={boardRef} className="flex items-center gap-0.5 overflow-x-auto px-4" style={{ scrollbarWidth: "none" }}>
-          {leftEnd !== null && (
-            <div className="shrink-0 rounded-lg px-2 py-1 text-xs font-black mr-1"
-              style={{ background: "rgba(16,185,129,0.2)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
-              {leftEnd}
-            </div>
-          )}
-          {board.map((pt, i) => (
-            <DominoTileComponent key={i} tile={pt.flipped ? [pt.tile[1], pt.tile[0]] : pt.tile}
-              horizontal size={30} justPlaced={i === lastPlacedIdx} />
-          ))}
-          {rightEnd !== null && (
-            <div className="shrink-0 rounded-lg px-2 py-1 text-xs font-black ml-1"
-              style={{ background: "rgba(16,185,129,0.2)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
-              {rightEnd}
-            </div>
-          )}
-        </div>
-      );
-    }
+    // Build horizontal chain: reversed leftArm → spinner → rightArm
+    const leftArmRev: PlacedTile[] = spinner ? [...leftArm].reverse() : [];
+    const hChain: PlacedTile[] = spinner
+      ? [...leftArmRev, spinner, ...rightArm]
+      : [...board];
+    const spinnerIdx = spinner ? leftArmRev.length : -1;
 
-    // ── Cross layout ──────────────────────────────────────────────────────
-    const renderTile = (pt: PlacedTile, i: number, horizontal: boolean) => (
-      <DominoTileComponent key={i}
-        tile={pt.flipped ? [pt.tile[1], pt.tile[0]] : pt.tile}
-        horizontal={horizontal}
-        size={28}
-        justPlaced={session.board.indexOf(pt) === lastPlacedIdx}
-      />
-    );
+    // Boustrophedon column: even rows L→R, odd rows R→L
+    const boustCol = (i: number) => {
+      const row = Math.floor(i / PER_ROW);
+      const c   = i % PER_ROW;
+      return row % 2 === 0 ? c : (PER_ROW - 1 - c);
+    };
 
-    // Pip end label helper
-    const endLabel = (val: number) => (
-      <div className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-black"
-        style={{ background: "rgba(16,185,129,0.2)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
+    // Horizontal pixel offset so arm container centres over spinner column
+    const sCol  = spinnerIdx >= 0 ? boustCol(spinnerIdx) : 0;
+    const armML = sCol * (HW + G) + Math.round((HW - VW) / 2);
+
+    // ── Sub-renderers ────────────────────────────────────────────────────────
+    const endBadge = (val: number) => (
+      <div
+        className="shrink-0 rounded px-1 py-0.5 text-[9px] font-black leading-none text-center"
+        style={{
+          background: "rgba(16,185,129,0.2)",
+          color: "#10b981",
+          border: "1px solid rgba(16,185,129,0.3)",
+          width: VW,
+        }}
+      >
         {val}
       </div>
     );
 
+    const renderTile = (pt: PlacedTile, key: string | number, horiz: boolean) => (
+      <DominoTileComponent
+        key={key}
+        tile={pt.flipped ? [pt.tile[1], pt.tile[0]] : pt.tile}
+        horizontal={horiz}
+        size={HALF}
+        justPlaced={session!.board.indexOf(pt) === lastPlacedIdx}
+      />
+    );
+
     return (
-      <div className="flex flex-col items-center gap-0.5 overflow-auto" style={{ maxHeight: "100%", maxWidth: "100%", scrollbarWidth: "none" }}>
+      <div
+        ref={boardRef}
+        className="flex flex-col items-start overflow-auto p-2"
+        style={{ gap: G, scrollbarWidth: "none", maxHeight: "100%", maxWidth: "100%" }}
+      >
+        {/* ── Top arm: vertical tiles above the spinner column ── */}
+        {spinner && (topArmTiles.length > 0 || topEnd !== null) && (
+          <div className="flex flex-col-reverse" style={{ gap: G, marginLeft: armML }}>
+            {/* flex-col-reverse: last source child → visual top, first → visual bottom */}
+            {topArmTiles.map((pt, i) => renderTile(pt, `t${i}`, false))}
+            {topEnd !== null && endBadge(topEnd)}
+          </div>
+        )}
 
-        {/* ── Top arm (extends upward, flex-col-reverse puts first tile closest to spinner) ── */}
-        <div className="flex flex-col-reverse items-center gap-0.5">
-          {topEnd !== null && topArm.length === 0 && endLabel(topEnd)}
-          {topArm.length > 0 && endLabel(topEnd!)}
-          {topArm.map((pt, i) => renderTile(pt, i, false))}
+        {/* ── Snake chain grid ── */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${PER_ROW}, ${HW}px)`,
+            gridAutoRows: `${HH}px`,
+            gap: `${G}px`,
+          }}
+        >
+          {hChain.map((pt, i) => (
+            <div
+              key={i}
+              style={{
+                gridRow:    Math.floor(i / PER_ROW) + 1,
+                gridColumn: boustCol(i) + 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {renderTile(pt, `h${i}`, true)}
+            </div>
+          ))}
         </div>
 
-        {/* ── Middle row: left arm + spinner + right arm ── */}
-        <div className="flex items-center gap-0.5">
-          {/* Left arm — tiles displayed in reverse so first is closest to spinner */}
-          <div className="flex flex-row-reverse items-center gap-0.5">
-            {leftEnd !== null && leftArm.length === 0 && endLabel(leftEnd)}
-            {leftArm.length > 0 && endLabel(leftEnd!)}
-            {leftArm.map((pt, i) => renderTile(pt, i, true))}
+        {/* ── Bottom arm: vertical tiles below the spinner column ── */}
+        {spinner && (botArmTiles.length > 0 || bottomEnd !== null) && (
+          <div className="flex flex-col" style={{ gap: G, marginLeft: armML }}>
+            {botArmTiles.map((pt, i) => renderTile(pt, `b${i}`, false))}
+            {bottomEnd !== null && endBadge(bottomEnd!)}
           </div>
+        )}
 
-          {/* Spinner — displayed perpendicular (vertical) to open the cross */}
-          <DominoTileComponent
-            tile={spinner.tile}
-            horizontal={false}
-            size={30}
-            justPlaced={session.board.indexOf(spinner) === lastPlacedIdx}
-          />
-
-          {/* Right arm */}
-          <div className="flex flex-row items-center gap-0.5">
-            {rightArm.map((pt, i) => renderTile(pt, i, true))}
-            {rightEnd !== null && rightArm.length === 0 && endLabel(rightEnd)}
-            {rightArm.length > 0 && endLabel(rightEnd!)}
-          </div>
-        </div>
-
-        {/* ── Bottom arm ── */}
-        <div className="flex flex-col items-center gap-0.5">
-          {botArm.map((pt, i) => renderTile(pt, i, false))}
-          {bottomEnd !== null && botArm.length === 0 && endLabel(bottomEnd!)}
-          {botArm.length > 0 && endLabel(bottomEnd!)}
+        {/* ── Chain end labels (which pips are exposed at each tail) ── */}
+        <div className="flex gap-2 flex-wrap">
+          {leftEnd !== null && (
+            <div
+              className="rounded px-2 py-0.5 text-[9px] font-black"
+              style={{ background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.25)" }}
+            >
+              ← {leftEnd}
+            </div>
+          )}
+          {rightEnd !== null && (
+            <div
+              className="rounded px-2 py-0.5 text-[9px] font-black"
+              style={{ background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.25)" }}
+            >
+              {rightEnd} →
+            </div>
+          )}
         </div>
       </div>
     );
