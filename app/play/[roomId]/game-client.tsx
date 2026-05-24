@@ -360,7 +360,25 @@ export default function GameClient({ room, currentProfile }: Props) {
   const effectiveLeftEnd  = leftRightBlocked ? null : leftEnd;
   const effectiveRightEnd = leftRightBlocked ? null : rightEnd;
 
-  const playable    = myHand.map(t => canPlay4(t, effectiveLeftEnd, effectiveRightEnd, topEnd, bottomEnd));
+  // Caribbean series-opening rule: the very first tile of a series MUST be [6,6].
+  // Detected by: board is empty AND every player's score is still 0 (no hand won yet).
+  const isFirstMoveOfSeries =
+    boardTiles.length === 0 &&
+    Object.values(session?.scores ?? {}).every(s => (s as number) === 0);
+
+  const playable = myHand.map(t => {
+    if (isFirstMoveOfSeries && isMyTurn) {
+      // Only [6,6] (or highest double available if no-one got [6,6]) is legal here.
+      const hasSixSix = myHand.some(tile => tile[0] === 6 && tile[1] === 6);
+      if (hasSixSix) return t[0] === 6 && t[1] === 6;
+      // Fallback: only the highest double in my hand is playable
+      const myHighest = myHand
+        .filter(tile => tile[0] === tile[1])
+        .reduce((max, tile) => tile[0] > max ? tile[0] : max, -1);
+      return t[0] === t[1] && t[0] === myHighest;
+    }
+    return canPlay4(t, effectiveLeftEnd, effectiveRightEnd, topEnd, bottomEnd);
+  });
   const hasPlayable = playable.some(Boolean);
   const boneyardEmpty = (session?.boneyard?.length ?? 0) === 0;
   const gameMode: GameMode = (room.game_mode as GameMode) ?? "draw";
@@ -712,20 +730,32 @@ export default function GameClient({ room, currentProfile }: Props) {
     const { hands, boneyard } = dealTiles(playerCount, mode);
 
     // Determine first player:
-    //   Round 1 → player with the highest double (double-six starts)
-    //   Round 2+ → winner of the previous round (stored in session.current_turn)
-    const isFirstGame = !session?.id;
+    //   First game of series (new game or resetScores) → player with [6,6] plays first
+    //   Subsequent games in same series → winner of previous hand plays first (any tile)
+    const isFirstOfSeries = !session?.id || resetScores;
     let firstTurnIdx = 0;
-    if (isFirstGame) {
-      let highestDouble = -1;
-      hands.forEach((hand, i) => {
-        hand.forEach((tile) => {
-          if (tile[0] === tile[1] && tile[0] > highestDouble) {
-            highestDouble = tile[0];
-            firstTurnIdx = i;
-          }
+    if (isFirstOfSeries) {
+      // Caribbean rule: double-6 holder opens the series
+      let found = false;
+      for (let i = 0; i < hands.length; i++) {
+        if (hands[i].some(t => t[0] === 6 && t[1] === 6)) {
+          firstTurnIdx = i;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        // Fallback (e.g. 2-3 players, [6,6] in boneyard): highest double goes first
+        let highestDouble = -1;
+        hands.forEach((hand, i) => {
+          hand.forEach((tile) => {
+            if (tile[0] === tile[1] && tile[0] > highestDouble) {
+              highestDouble = tile[0];
+              firstTurnIdx = i;
+            }
+          });
         });
-      });
+      }
     }
 
     let sessionId = session?.id;
@@ -769,10 +799,10 @@ export default function GameClient({ room, currentProfile }: Props) {
       );
     }
 
-    // For subsequent rounds, the winner (stored in session.current_turn) goes first.
-    // For the very first game, use the player with the highest double.
+    // First game of series → [6,6] holder plays first (must play [6,6]).
+    // All other games → winner of previous hand plays first (any tile).
     let firstTurnProfileId: string;
-    if (!isFirstGame && session?.current_turn && allProfileIds.includes(session.current_turn)) {
+    if (!isFirstOfSeries && session?.current_turn && allProfileIds.includes(session.current_turn)) {
       firstTurnProfileId = session.current_turn;
     } else {
       firstTurnProfileId = allProfileIds[firstTurnIdx] ?? currentProfile.id;
@@ -851,6 +881,20 @@ export default function GameClient({ room, currentProfile }: Props) {
     if (!isMyTurn) { showToast("It's not your turn!"); return; }
 
     const tile    = myHand[tileIdx];
+
+    // ── Caribbean series-opening rule ─────────────────────────────────────────
+    // The first tile played in a series must be [6,6] (or the highest double
+    // available if [6,6] was not dealt to any player).
+    const seriesFirstMove = (session.board ?? []).length === 0 &&
+      Object.values(session.scores ?? {}).every(s => (s as number) === 0);
+    if (seriesFirstMove) {
+      const hasSixSix = myHand.some(t => t[0] === 6 && t[1] === 6);
+      if (hasSixSix && (tile[0] !== 6 || tile[1] !== 6)) {
+        showToast("You must open the series with double-6! 🎲");
+        setActionLoading(false);
+        return;
+      }
+    }
 
     const matches = canPlayEnds(tile, effectiveLeftEnd, effectiveRightEnd, topEnd, bottomEnd);
     if (matches === "none") { showToast("That tile can't be played here!"); return; }
