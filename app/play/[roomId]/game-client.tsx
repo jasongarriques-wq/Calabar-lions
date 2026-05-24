@@ -2165,9 +2165,9 @@ export default function GameClient({ room, currentProfile }: Props) {
                         return (
                           <motion.div
                             key={i}
-                            animate={{ rotateY: isRotated ? 180 : 0 }}
+                            animate={{ rotate: isRotated ? 90 : 0 }}
                             transition={{ type: "spring", stiffness: 320, damping: 22 }}
-                            style={{ display: "inline-flex", transformStyle: "preserve-3d" }}
+                            style={{ display: "inline-flex" }}
                           >
                             <DominoTileComponent
                               tile={displayTile}
