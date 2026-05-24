@@ -983,7 +983,8 @@ export default function GameClient({ room, currentProfile }: Props) {
     const nextTurn  = getNextTurn(allPlayers, currentProfile.id);
     const newScores = { ...(session.scores ?? {}) };
 
-    await supabase.from("game_players").update({ hand: newHand }).eq("id", myPlayer.id);
+    await supabase.from("game_players").update({ hand: newHand })
+      .eq("session_id", session.id).eq("profile_id", currentProfile.id);
     setLastPlacedIdx(board.length - 1);
 
     if (newHand.length === 0) {
@@ -1042,7 +1043,8 @@ export default function GameClient({ room, currentProfile }: Props) {
     const newHand = [...myHand, drawn];
 
     await Promise.all([
-      supabase.from("game_players").update({ hand: newHand }).eq("id", myPlayer.id),
+      supabase.from("game_players").update({ hand: newHand })
+        .eq("session_id", session.id).eq("profile_id", currentProfile.id),
       supabase.from("game_sessions").update({ boneyard, updated_at: new Date().toISOString() }).eq("id", session.id),
     ]);
 
