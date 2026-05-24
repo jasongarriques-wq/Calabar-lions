@@ -166,6 +166,15 @@ const MODE_LABELS: Record<GameMode, string> = {
 type GamePhase = "lobby" | "playing" | "blocked" | "gameOver" | "seriesOver";
 type ChatTab = "chat" | "players";
 
+interface JoinRequest {
+  id: string;
+  room_id: string;
+  requester_id: string;
+  requester_name: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
 interface FloatingReaction {
   id: string;
   emoji: string;
@@ -302,6 +311,8 @@ export default function GameClient({ room, currentProfile }: Props) {
   const [rotatedTiles, setRotatedTiles] = useState<Set<number>>(new Set());
   const [autoRestartCount, setAutoRestartCount] = useState<number | null>(null);
   const autoRestartRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [pendingRequests, setPendingRequests] = useState<JoinRequest[]>([]);
+  const [myJoinRequest, setMyJoinRequest] = useState<JoinRequest | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -444,6 +455,22 @@ export default function GameClient({ room, currentProfile }: Props) {
     }
 
     if (roomsData) setAllRooms(roomsData as GameRoom[]);
+
+    // Load join requests for this room
+    const { data: joinReqData } = await supabase
+      .from("join_requests")
+      .select("*")
+      .eq("room_id", room.id);
+
+    if (joinReqData) {
+      const allReqs = joinReqData as JoinRequest[];
+      setPendingRequests(allReqs.filter(r => r.status === "pending"));
+      if (currentProfile) {
+        const mine = allReqs.find(r => r.requester_id === currentProfile.id) ?? null;
+        setMyJoinRequest(mine);
+      }
+    }
+
     setLoading(false);
   }, [currentProfile, room.id]);
 
@@ -545,6 +572,24 @@ export default function GameClient({ room, currentProfile }: Props) {
         { event: "*", schema: "public", table: "game_rooms", filter: `id=eq.${room.id}` },
         () => { loadGameData(); }
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "join_requests", filter: `room_id=eq.${room.id}` },
+        async () => {
+          const { data } = await supabase
+            .from("join_requests")
+            .select("*")
+            .eq("room_id", room.id);
+          if (data) {
+            const allReqs = data as JoinRequest[];
+            setPendingRequests(allReqs.filter(r => r.status === "pending"));
+            if (currentProfile) {
+              const mine = allReqs.find(r => r.requester_id === currentProfile.id) ?? null;
+              setMyJoinRequest(mine);
+            }
+          }
+        }
+      )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -596,17 +641,62 @@ export default function GameClient({ room, currentProfile }: Props) {
     return next?.profile_id ?? currentTurnId;
   }
 
-  async function handleJoinGame() {
-    if (!currentProfile || !session) return;
+  async function handleRequestJoin() {
+    if (!currentProfile) return;
+    setActionLoading(true);
+    const displayName = currentProfile.full_name ?? currentProfile.display_name ?? "Lion";
+    const { data, error } = await supabase
+      .from("join_requests")
+      .upsert(
+        {
+          room_id: room.id,
+          requester_id: currentProfile.id,
+          requester_name: displayName,
+          status: "pending",
+        },
+        { onConflict: "room_id,requester_id" }
+      )
+      .select()
+      .single();
+    if (!error && data) {
+      setMyJoinRequest(data as JoinRequest);
+      showToast("Join request sent! Waiting for host approval.");
+    } else {
+      showToast("Could not send request. Try again.");
+    }
+    setActionLoading(false);
+  }
+
+  async function handleApproveRequest(requesterId: string, requesterName: string) {
+    if (!currentProfile || !isHost || !session) return;
     setActionLoading(true);
     const takenSeats = allPlayers.map((p) => p.seat);
     const availableSeat = [0, 1, 2, 3].find((s) => !takenSeats.includes(s));
-    if (availableSeat === undefined) { showToast("Table is full!"); setActionLoading(false); return; }
+    if (availableSeat === undefined) {
+      showToast("Table is full!");
+      // Mark as rejected since there's no room
+      await supabase.from("join_requests").update({ status: "rejected" })
+        .eq("room_id", room.id).eq("requester_id", requesterId);
+      setActionLoading(false);
+      return;
+    }
+    // Seat the player
     await supabase.from("game_players").upsert(
-      { session_id: session.id, profile_id: currentProfile.id, seat: availableSeat, hand: [], score: 0 },
+      { session_id: session.id, profile_id: requesterId, seat: availableSeat, hand: [], score: 0 },
       { onConflict: "session_id,profile_id" }
     );
     await supabase.from("game_rooms").update({ current_players: allPlayers.length + 1 }).eq("id", room.id);
+    await supabase.from("join_requests").update({ status: "approved" })
+      .eq("room_id", room.id).eq("requester_id", requesterId);
+    showToast(`${requesterName} joined the table!`);
+    setActionLoading(false);
+  }
+
+  async function handleDenyRequest(requesterId: string) {
+    if (!currentProfile || !isHost) return;
+    setActionLoading(true);
+    await supabase.from("join_requests").update({ status: "rejected" })
+      .eq("room_id", room.id).eq("requester_id", requesterId);
     setActionLoading(false);
   }
 
@@ -1563,15 +1653,78 @@ export default function GameClient({ room, currentProfile }: Props) {
 
                   {/* Actions */}
                   <div className="mt-5 space-y-2">
-                    {!alreadySeated && session && (
-                      <button
-                        onClick={handleJoinGame}
-                        disabled={actionLoading}
-                        className="w-full rounded-xl py-3 text-sm font-black text-white transition-all disabled:opacity-50"
-                        style={{ background: "linear-gradient(135deg, #059669, #10b981)" }}
+
+                    {/* Host: pending join-request notifications */}
+                    {isHost && pendingRequests.length > 0 && (
+                      <div
+                        className="rounded-xl border p-3 space-y-2"
+                        style={{ background: "rgba(217,119,6,0.08)", borderColor: "rgba(217,119,6,0.35)" }}
                       >
-                        {actionLoading ? "Joining..." : "Join Table"}
-                      </button>
+                        <p className="text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: "#f59e0b" }}>
+                          🚪 Join Requests ({pendingRequests.length})
+                        </p>
+                        {pendingRequests.map(req => (
+                          <div key={req.id} className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-white truncate">{req.requester_name}</span>
+                            <div className="flex gap-1.5 shrink-0">
+                              <button
+                                onClick={() => handleApproveRequest(req.requester_id, req.requester_name)}
+                                disabled={actionLoading}
+                                className="rounded-lg px-3 py-1 text-xs font-black disabled:opacity-50"
+                                style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.4)", color: "#10b981" }}
+                              >
+                                ✓ Approve
+                              </button>
+                              <button
+                                onClick={() => handleDenyRequest(req.requester_id)}
+                                disabled={actionLoading}
+                                className="rounded-lg px-3 py-1 text-xs font-black disabled:opacity-50"
+                                style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#f87171" }}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Non-host, not seated: request-to-join flow */}
+                    {!isHost && !alreadySeated && (
+                      myJoinRequest === null ? (
+                        <button
+                          onClick={handleRequestJoin}
+                          disabled={actionLoading}
+                          className="w-full rounded-xl py-3 text-sm font-black text-white transition-all disabled:opacity-50"
+                          style={{ background: "linear-gradient(135deg, #059669, #10b981)" }}
+                        >
+                          {actionLoading ? "Sending Request…" : "🙋 Request to Join"}
+                        </button>
+                      ) : myJoinRequest.status === "pending" ? (
+                        <div
+                          className="w-full rounded-xl py-3 text-sm text-center font-semibold"
+                          style={{ background: "rgba(217,119,6,0.1)", border: "1px solid rgba(217,119,6,0.35)", color: "#f59e0b" }}
+                        >
+                          ⏳ Request sent — waiting for host approval…
+                        </div>
+                      ) : myJoinRequest.status === "rejected" ? (
+                        <div className="space-y-2">
+                          <div
+                            className="w-full rounded-xl py-3 text-sm text-center font-semibold"
+                            style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#f87171" }}
+                          >
+                            ✕ Request declined by host
+                          </div>
+                          <button
+                            onClick={handleRequestJoin}
+                            disabled={actionLoading}
+                            className="w-full rounded-xl py-2.5 text-xs font-bold text-zinc-400 hover:text-white transition-colors"
+                            style={{ background: "#1a1a1a", border: "1px solid #2a2a2a" }}
+                          >
+                            Send Another Request
+                          </button>
+                        </div>
+                      ) : null /* approved = they'll appear in allPlayers */
                     )}
 
                     {isHost ? (
@@ -1598,14 +1751,14 @@ export default function GameClient({ room, currentProfile }: Props) {
                           {actionLoading ? "Starting..." : "Solo / Practice Mode"}
                         </button>
                       )
-                    ) : (
+                    ) : alreadySeated ? (
                       <div
                         className="w-full rounded-xl py-3 text-sm text-center text-zinc-500"
                         style={{ background: "#1a1a1a", border: "1px solid #2a2a2a" }}
                       >
                         ⏳ Waiting for host to start...
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
