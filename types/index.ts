@@ -194,7 +194,7 @@ export type GameSession = {
   round_number: number;
   max_rounds: number;
   current_turn: string;
-  status: 'active' | 'finished';
+  status: 'active' | 'finished' | 'series_over';
   board: PlacedTile[];
   boneyard: DominoTile[];
   left_end: number | null;

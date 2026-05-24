@@ -327,12 +327,27 @@ export default function GameClient({ room, currentProfile }: Props) {
   const boardRef = useRef<HTMLDivElement>(null);
   // Ref so realtime callbacks always have the latest session id without stale closures
   const sessionIdRef = useRef<string | null>(null);
+  // Ref to the active Supabase channel so game actions can broadcast state changes
+  const gameChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
+  };
+
+  /** Push game state to all clients instantly via broadcast (belt-and-suspenders
+   *  alongside postgres_changes which can lag or miss events). */
+  const broadcastMove = (
+    sessionPatch: Partial<GameSession>,
+    playerPatch?: { profile_id: string; tile_count: number }
+  ) => {
+    gameChannelRef.current?.send({
+      type: "broadcast",
+      event: "game_move",
+      payload: { sessionPatch, playerPatch },
+    });
   };
 
   const addFloatingReaction = (emoji: string) => {
@@ -531,6 +546,31 @@ export default function GameClient({ room, currentProfile }: Props) {
     const channel = supabase
       .channel(`game-${room.id}`)
       .on(
+        "broadcast",
+        { event: "game_move" },
+        ({ payload }: { payload: Record<string, unknown> }) => {
+          // Instant state push from the player who just moved.
+          // Applies before postgres_changes arrives so other clients see
+          // board/turn updates without any perceptible delay.
+          if (!payload) return;
+
+          if (payload.sessionPatch) {
+            const patch = payload.sessionPatch as Partial<GameSession>;
+            setSession(prev => prev ? { ...prev, ...patch } : prev);
+            if (patch.status === "series_over") setGamePhase("seriesOver");
+            else if (patch.status === "finished") setGamePhase("gameOver");
+            else if (patch.status === "active")   setGamePhase("playing");
+          }
+
+          if (payload.playerPatch) {
+            const { profile_id, tile_count } = payload.playerPatch as { profile_id: string; tile_count: number };
+            setAllPlayers(prev => prev.map(p =>
+              p.profile_id === profile_id ? { ...p, tile_count } : p
+            ));
+          }
+        }
+      )
+      .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "game_sessions", filter: `room_id=eq.${room.id}` },
         (payload) => {
@@ -625,7 +665,12 @@ export default function GameClient({ room, currentProfile }: Props) {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    gameChannelRef.current = channel;
+
+    return () => {
+      gameChannelRef.current = null;
+      supabase.removeChannel(channel);
+    };
   // session?.id intentionally excluded: sessionIdRef keeps it fresh inside callbacks
   // without causing the channel to tear down / rebuild on every new hand.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1062,6 +1107,20 @@ export default function GameClient({ room, currentProfile }: Props) {
       return { ...base, current_turn: nextTurn };
     });
 
+    // Broadcast to all other clients so they see the move instantly
+    {
+      const sessionPatch: Partial<GameSession> = {
+        board,
+        left_end: lEnd ?? null,
+        right_end: rEnd ?? null,
+        consecutive_passes: 0,
+        ...(newHand.length === 0
+          ? { scores: newScores, status: dbStatus as GameSession["status"], current_turn: currentProfile.id }
+          : { current_turn: nextTurn }),
+      };
+      broadcastMove(sessionPatch, { profile_id: currentProfile.id, tile_count: newHand.length });
+    }
+
     setSelectedTile(null);
     setShowEndChoices(false);
     setRotatedTiles(new Set()); // clear rotations after a tile is played
@@ -1092,6 +1151,12 @@ export default function GameClient({ room, currentProfile }: Props) {
         : p
     ));
     setSession(prev => prev ? { ...prev, boneyard } : prev);
+
+    // Broadcast to all other clients
+    broadcastMove(
+      { boneyard },
+      { profile_id: currentProfile.id, tile_count: newHand.length }
+    );
 
     setActionLoading(false);
     showToast(`Drew: ${drawn[0]}-${drawn[1]}`);
@@ -1178,6 +1243,9 @@ export default function GameClient({ room, currentProfile }: Props) {
 
       // Optimistic local update for turn advancement
       setSession(prev => prev ? { ...prev, current_turn: nextTurn, consecutive_passes: newPasses } : prev);
+
+      // Broadcast to all other clients
+      broadcastMove({ current_turn: nextTurn, consecutive_passes: newPasses });
     }
 
     setActionLoading(false);
