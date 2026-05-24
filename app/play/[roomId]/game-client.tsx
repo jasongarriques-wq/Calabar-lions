@@ -626,7 +626,10 @@ export default function GameClient({ room, currentProfile }: Props) {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [room.id, session?.id, currentProfile?.id]);
+  // session?.id intentionally excluded: sessionIdRef keeps it fresh inside callbacks
+  // without causing the channel to tear down / rebuild on every new hand.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room.id, currentProfile?.id]);
 
   // ── Auto-restart countdown when game ends ─────────────────────────────────
   useEffect(() => {
@@ -988,6 +991,7 @@ export default function GameClient({ room, currentProfile }: Props) {
     const newHand   = myHand.filter((_, i) => i !== tileIdx);
     const nextTurn  = getNextTurn(allPlayers, currentProfile.id);
     const newScores = { ...(session.scores ?? {}) };
+    let dbStatus: string = "active"; // updated below if DOMINO
 
     await supabase.from("game_players").update({ hand: newHand })
       .eq("session_id", session.id).eq("profile_id", currentProfile.id);
@@ -1015,7 +1019,7 @@ export default function GameClient({ room, currentProfile }: Props) {
       // Check if series is now won — check the winning team's score, not just this player
       const maxNewWins  = Math.max(...Object.values(newScores).map(v => v as number));
       const seriesWon   = maxNewWins >= seriesTarget;
-      const dbStatus    = seriesWon ? "series_over" : "finished";
+      dbStatus          = seriesWon ? "series_over" : "finished";
       const nextPhase: GamePhase = seriesWon ? "seriesOver" : "gameOver";
 
       // Store winner as current_turn so next hand knows who plays first.
@@ -1033,6 +1037,30 @@ export default function GameClient({ room, currentProfile }: Props) {
         consecutive_passes: 0, updated_at: new Date().toISOString(),
       }).eq("id", session.id);
     }
+
+    // ── Optimistic local update ───────────────────────────────────────────────
+    // Update local state immediately so the playing client doesn't wait for the
+    // realtime round-trip. Other clients still get updates via the subscription.
+    setMyPlayer(prev => prev ? { ...prev, hand: newHand, tile_count: newHand.length } : prev);
+    setAllPlayers(prev => prev.map(p =>
+      p.profile_id === currentProfile.id
+        ? { ...p, hand: newHand, tile_count: newHand.length }
+        : p
+    ));
+    setSession(prev => {
+      if (!prev) return prev;
+      const base = {
+        ...prev,
+        board,
+        left_end: lEnd ?? null,
+        right_end: rEnd ?? null,
+        consecutive_passes: 0,
+      };
+      if (newHand.length === 0) {
+        return { ...base, scores: newScores, status: dbStatus, current_turn: currentProfile.id };
+      }
+      return { ...base, current_turn: nextTurn };
+    });
 
     setSelectedTile(null);
     setShowEndChoices(false);
@@ -1055,6 +1083,15 @@ export default function GameClient({ room, currentProfile }: Props) {
         .eq("session_id", session.id).eq("profile_id", currentProfile.id),
       supabase.from("game_sessions").update({ boneyard, updated_at: new Date().toISOString() }).eq("id", session.id),
     ]);
+
+    // Optimistic local update
+    setMyPlayer(prev => prev ? { ...prev, hand: newHand, tile_count: newHand.length } : prev);
+    setAllPlayers(prev => prev.map(p =>
+      p.profile_id === currentProfile.id
+        ? { ...p, hand: newHand, tile_count: newHand.length }
+        : p
+    ));
+    setSession(prev => prev ? { ...prev, boneyard } : prev);
 
     setActionLoading(false);
     showToast(`Drew: ${drawn[0]}-${drawn[1]}`);
@@ -1138,6 +1175,9 @@ export default function GameClient({ room, currentProfile }: Props) {
         current_turn: nextTurn, consecutive_passes: newPasses,
         updated_at: new Date().toISOString(),
       }).eq("id", session.id);
+
+      // Optimistic local update for turn advancement
+      setSession(prev => prev ? { ...prev, current_turn: nextTurn, consecutive_passes: newPasses } : prev);
     }
 
     setActionLoading(false);
