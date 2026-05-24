@@ -96,16 +96,31 @@ function canPlay(tile: DominoTile, leftEnd: number | null, rightEnd: number | nu
   return canPlayTile(tile, leftEnd, rightEnd) !== "none";
 }
 
-/** Compute the exposed pip at the tip of a given arm, starting from spinnerValue. */
+/**
+ * Compute the exposed (free) pip at the tip of a given arm.
+ *
+ * Flip conventions — deliberately asymmetric by design:
+ *   LEFT/TOP arms  ("left" convention):
+ *     tile[0] === connectingEnd  →  flipped = true   →  tile[1] is the free pip
+ *     tile[1] === connectingEnd  →  flipped = false  →  tile[0] is the free pip
+ *     ∴  free pip = flipped ? tile[1] : tile[0]
+ *
+ *   RIGHT/BOTTOM arms ("right" convention):
+ *     tile[0] === connectingEnd  →  flipped = false  →  tile[1] is the free pip
+ *     tile[1] === connectingEnd  →  flipped = true   →  tile[0] is the free pip
+ *     ∴  free pip = flipped ? tile[0] : tile[1]
+ *
+ * Both conventions produce correct visual rendering via:
+ *   display tile = flipped ? [tile[1], tile[0]] : tile
+ * (connecting pip faces inward, free pip faces outward toward the table edge)
+ */
 function computeArmEnd(
   armTiles: PlacedTile[],
   spinnerValue: number,
-  convention: "left" | "right"   // "left" = top/left arms, "right" = bottom/right arms
+  convention: "left" | "right"
 ): number {
   if (armTiles.length === 0) return spinnerValue;
   const last = armTiles[armTiles.length - 1];
-  // left-convention: flipped=true→tile[1] exposed; flipped=false→tile[0] exposed
-  // right-convention: flipped=false→tile[1] exposed; flipped=true→tile[0] exposed
   if (convention === "left") return last.flipped ? last.tile[1] : last.tile[0];
   return last.flipped ? last.tile[0] : last.tile[1];
 }
@@ -555,14 +570,15 @@ export default function GameClient({ room, currentProfile }: Props) {
     };
   }, [gamePhase]);
 
-  // Fire handleStartGame the moment countdown hits 0
+  // Fire handleStartGame the moment countdown hits 0 — HOST ONLY.
+  // Other clients receive the new hand via the realtime subscription.
   useEffect(() => {
     if (autoRestartCount !== 0) return;
     if (autoRestartRef.current) {
       clearInterval(autoRestartRef.current);
       autoRestartRef.current = null;
     }
-    handleStartGame();
+    if (isHost) handleStartGame();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRestartCount]);
 
@@ -590,7 +606,9 @@ export default function GameClient({ room, currentProfile }: Props) {
   }
 
   async function handleStartGame(resetScores = false) {
-    if (!currentProfile) return;
+    // ── HOST ONLY: only one client shuffles and writes hands to DB.
+    // All other clients receive the new game state via realtime subscription.
+    if (!currentProfile || !isHost) { setActionLoading(false); return; }
     setActionLoading(true);
 
     const mode = gameMode;
@@ -891,9 +909,16 @@ export default function GameClient({ room, currentProfile }: Props) {
 
     // Check blocked: all players passed
     if (newPasses >= allPlayers.length) {
-      // Table is blocked
+      // ── Re-fetch all hands from DB for accurate pip counts ────────────────
+      // Local state may be stale due to realtime lag; DB is the source of truth.
+      const { data: freshPlayers } = await supabase
+        .from("game_players")
+        .select("profile_id, hand")
+        .eq("session_id", session.id);
+
       const results: BlockedGameResult[] = allPlayers.map((p) => {
-        const pips = calculatePips(p.hand ?? []);
+        const freshHand = freshPlayers?.find(fp => fp.profile_id === p.profile_id)?.hand ?? p.hand ?? [];
+        const pips = calculatePips(freshHand as DominoTile[]);
         return { playerId: p.profile_id, displayName: p.display_name, remainingPips: pips, isWinner: false };
       });
       results.sort((a, b) => a.remainingPips - b.remainingPips);
@@ -965,7 +990,8 @@ export default function GameClient({ room, currentProfile }: Props) {
   function handleDoubleClickTile(i: number) {
     if (!isMyTurn) return;
     const tile    = myHand[i];
-    const matches = canPlayEnds(tile, leftEnd, rightEnd, topEnd, bottomEnd);
+    // Use effectiveLeftEnd/Right so the Caribbean arm constraint is respected
+    const matches = canPlayEnds(tile, effectiveLeftEnd, effectiveRightEnd, topEnd, bottomEnd);
     if (matches === "none") { showToast("That tile can't be played here!"); return; }
     if (Array.isArray(matches) && matches.length > 1) {
       setSelectedTile(i);
@@ -1006,7 +1032,8 @@ export default function GameClient({ room, currentProfile }: Props) {
     const idx = parseInt(e.dataTransfer.getData("tileIdx"), 10);
     if (isNaN(idx) || idx < 0 || idx >= myHand.length) return;
     const tile    = myHand[idx];
-    const matches = canPlayEnds(tile, leftEnd, rightEnd, topEnd, bottomEnd);
+    // Use effectiveLeftEnd/Right so the Caribbean arm constraint is respected
+    const matches = canPlayEnds(tile, effectiveLeftEnd, effectiveRightEnd, topEnd, bottomEnd);
     if (matches === "none") { showToast("That tile can't play here!"); setDraggedTileIdx(null); return; }
 
     if (Array.isArray(matches) && matches.length > 1) {
@@ -1782,14 +1809,12 @@ export default function GameClient({ room, currentProfile }: Props) {
                     {/* Actions */}
                     <div className="p-6 pt-2 flex gap-3">
                       <button
-                        onClick={() => {
-                          handleStartGame(true); // reset wins — fresh series
-                        }}
-                        disabled={actionLoading}
-                        className="flex-1 rounded-xl py-3 text-sm font-black disabled:opacity-50"
+                        onClick={() => { handleStartGame(true); }}
+                        disabled={actionLoading || !isHost}
+                        className="flex-1 rounded-xl py-3 text-sm font-black disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{ background: "linear-gradient(135deg, #059669, #10b981)", color: "white" }}
                       >
-                        {actionLoading ? "Dealing…" : "🎲 New Series"}
+                        {actionLoading ? "Dealing…" : isHost ? "🎲 New Series" : "⏳ Waiting for host…"}
                       </button>
                       <Link
                         href="/play"
@@ -1885,6 +1910,7 @@ export default function GameClient({ room, currentProfile }: Props) {
                 <div className="p-6 pt-2 flex gap-3">
                   <button
                     onClick={() => {
+                      if (!isHost) return;
                       if (autoRestartRef.current) {
                         clearInterval(autoRestartRef.current);
                         autoRestartRef.current = null;
@@ -1892,11 +1918,11 @@ export default function GameClient({ room, currentProfile }: Props) {
                       setAutoRestartCount(null);
                       handleStartGame();
                     }}
-                    disabled={actionLoading}
-                    className="flex-1 rounded-xl py-3 text-sm font-black disabled:opacity-50"
+                    disabled={actionLoading || !isHost}
+                    className="flex-1 rounded-xl py-3 text-sm font-black disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ background: "linear-gradient(135deg, #d97706, #f59e0b)", color: "#1a0a00" }}
                   >
-                    {actionLoading ? "Dealing…" : "🎲 Deal Now"}
+                    {actionLoading ? "Dealing…" : isHost ? "🎲 Deal Now" : "⏳ Waiting for host…"}
                   </button>
                   <Link
                     href="/play"
