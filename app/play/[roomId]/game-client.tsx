@@ -323,7 +323,13 @@ export default function GameClient({ room, currentProfile }: Props) {
   const topEnd    = hasSpinner ? computeArmEnd(topArm,    spinnerValue!, "left")  : null;
   const bottomEnd = hasSpinner ? computeArmEnd(bottomArm, spinnerValue!, "right") : null;
 
-  const playable    = myHand.map(t => canPlay4(t, leftEnd, rightEnd, topEnd, bottomEnd));
+  // ── Caribbean arm constraint ──────────────────────────────────────────────
+  // Left/right arms can only extend once top AND bottom each have ≥1 tile.
+  const leftRightBlocked = hasSpinner && (topArm.length === 0 || bottomArm.length === 0);
+  const effectiveLeftEnd  = leftRightBlocked ? null : leftEnd;
+  const effectiveRightEnd = leftRightBlocked ? null : rightEnd;
+
+  const playable    = myHand.map(t => canPlay4(t, effectiveLeftEnd, effectiveRightEnd, topEnd, bottomEnd));
   const hasPlayable = playable.some(Boolean);
   const boneyardEmpty = (session?.boneyard?.length ?? 0) === 0;
   const gameMode: GameMode = (room.game_mode as GameMode) ?? "draw";
@@ -343,9 +349,9 @@ export default function GameClient({ room, currentProfile }: Props) {
   const alreadySeated  = allPlayers.some(p => p.profile_id === currentProfile?.id);
 
   const selectedTileObj = selectedTile !== null ? myHand[selectedTile] : null;
-  // All arms the selected tile can play on
+  // All arms the selected tile can play on (respecting Caribbean arm constraint)
   const selectedPlayEnds = selectedTileObj && session
-    ? canPlayEnds(selectedTileObj, leftEnd, rightEnd, topEnd, bottomEnd)
+    ? canPlayEnds(selectedTileObj, effectiveLeftEnd, effectiveRightEnd, topEnd, bottomEnd)
     : null;
   const canPlayAny   = selectedPlayEnds !== null && selectedPlayEnds !== "none";
   const needsChoice  = Array.isArray(selectedPlayEnds) && selectedPlayEnds.length > 1;
@@ -717,7 +723,13 @@ export default function GameClient({ room, currentProfile }: Props) {
     if (!isMyTurn) { showToast("It's not your turn!"); return; }
 
     const tile    = myHand[tileIdx];
-    const matches = canPlayEnds(tile, leftEnd, rightEnd, topEnd, bottomEnd);
+
+    // ── Caribbean rule: first tile of the game must be a double ─────────────
+    if ((session.board ?? []).length === 0 && tile[0] !== tile[1]) {
+      showToast("First play must be a double! 🎯"); return;
+    }
+
+    const matches = canPlayEnds(tile, effectiveLeftEnd, effectiveRightEnd, topEnd, bottomEnd);
     if (matches === "none") { showToast("That tile can't be played here!"); return; }
 
     setActionLoading(true);
@@ -732,11 +744,12 @@ export default function GameClient({ room, currentProfile }: Props) {
 
     if (lEnd === null) {
       // ── First tile ever ──────────────────────────────────────────────────
-      arm    = "right";
-      lEnd   = tile[0];
-      rEnd   = tile[1];
-      // If first tile is a double, open spinner immediately
-      if (tile[0] === tile[1]) { tEnd = tile[0]; bEnd = tile[0]; }
+      arm  = "right";
+      lEnd = tile[0];
+      rEnd = tile[1];
+      // First tile is always a double → immediately open spinner
+      tEnd = tile[0];
+      bEnd = tile[0];
       board.push({ tile, flipped: false, arm });
     } else {
       // ── Determine which end ──────────────────────────────────────────────
@@ -746,10 +759,15 @@ export default function GameClient({ room, currentProfile }: Props) {
         playSide = (matches as Array<"left"|"right"|"top"|"bottom">)[0];
       } else {
         playSide = end;
-        // Validate
         if (Array.isArray(matches) && !matches.includes(playSide)) {
           showToast("That tile doesn't match that end!"); setActionLoading(false); return;
         }
+      }
+
+      // ── Caribbean arm constraint: top & bottom must each have ≥1 tile
+      //    before left/right arms can extend ────────────────────────────────
+      if ((playSide === "left" || playSide === "right") && leftRightBlocked) {
+        showToast("Play on the top or bottom arm first! ☝️"); setActionLoading(false); return;
       }
 
       if (playSide === "right") {
@@ -763,26 +781,23 @@ export default function GameClient({ room, currentProfile }: Props) {
         arm = "left";
         board.unshift({ tile, flipped, arm });
       } else if (playSide === "top") {
-        if (tEnd === null) { showToast("Top not open yet!"); setActionLoading(false); return; }
-        // Top arm uses left-convention: tile[0]===end → flipped=true, newEnd=tile[1]
+        if (tEnd === null) { showToast("Top arm not open yet!"); setActionLoading(false); return; }
         if (tile[0] === tEnd) { flipped = true;  tEnd = tile[1]; }
         else                  { flipped = false; tEnd = tile[0]; }
         arm = "top";
         board.push({ tile, flipped, arm });
       } else { // bottom
-        if (bEnd === null) { showToast("Bottom not open yet!"); setActionLoading(false); return; }
-        // Bottom arm uses right-convention: tile[0]===end → flipped=false, newEnd=tile[1]
+        if (bEnd === null) { showToast("Bottom arm not open yet!"); setActionLoading(false); return; }
         if (tile[0] === bEnd) { flipped = false; bEnd = tile[1]; }
         else                  { flipped = true;  bEnd = tile[0]; }
         arm = "bottom";
         board.push({ tile, flipped, arm });
       }
 
-      // ── Spinner: first double played opens top/bottom ────────────────────
+      // ── Any subsequent double on left/right arm opens top/bottom ────────
       if (tile[0] === tile[1] && !hasSpinner && (playSide === "left" || playSide === "right")) {
         tEnd = tile[0];
         bEnd = tile[0];
-        // Mark this tile as the spinner by ensuring arm is set (already set above)
       }
     }
 
@@ -794,11 +809,34 @@ export default function GameClient({ room, currentProfile }: Props) {
     setLastPlacedIdx(board.length - 1);
 
     if (newHand.length === 0) {
+      // ── DOMINO! ─────────────────────────────────────────────────────────
+      showToast("🀱 DOMINO!");
+
+      // ── Caribbean team scoring ────────────────────────────────────────────
+      // teams mode (2v2): seats 0,2 = team A; seats 1,3 = team B.
+      // Winner's team scores the sum of OPPONENT team's pips only.
+      const myPlayer_ = allPlayers.find(p => p.profile_id === currentProfile.id);
+      const mySeat    = myPlayer_?.seat ?? 0;
+      const isTeams   = gameMode === "teams";
+
       const roundScore = allPlayers.reduce((sum, p) => {
         if (p.profile_id === currentProfile.id) return sum;
+        if (isTeams && mySeat % 2 === p.seat % 2) return sum; // skip partner
         return sum + calculatePips(p.hand ?? []);
       }, 0);
-      newScores[currentProfile.id] = (newScores[currentProfile.id] ?? 0) + roundScore;
+
+      // In teams mode, credit both partners' score line equally
+      if (isTeams) {
+        const partnerIds = allPlayers
+          .filter(p => p.seat % 2 === mySeat % 2)
+          .map(p => p.profile_id);
+        partnerIds.forEach(id => {
+          newScores[id] = (newScores[id] ?? 0) + roundScore;
+        });
+      } else {
+        newScores[currentProfile.id] = (newScores[currentProfile.id] ?? 0) + roundScore;
+      }
+
       await supabase.from("game_sessions").update({
         board, left_end: lEnd, right_end: rEnd, current_turn: nextTurn,
         scores: newScores, status: "finished", consecutive_passes: 0,
@@ -840,8 +878,7 @@ export default function GameClient({ room, currentProfile }: Props) {
   async function handlePass() {
     if (!session || !myPlayer || !currentProfile) return;
     if (!isMyTurn) { showToast("Not your turn!"); return; }
-    if (hasPlayable) { showToast("You have playable tiles!"); return; }
-    if (!boneyardEmpty) { showToast("Draw from boneyard first!"); return; }
+    if (hasPlayable) { showToast("You have playable tiles — you must play!"); return; }
 
     setActionLoading(true);
     const nextTurn = getNextTurn(allPlayers, currentProfile.id);
@@ -860,11 +897,28 @@ export default function GameClient({ room, currentProfile }: Props) {
       setBlockedResults(results);
       setGamePhase("blocked");
 
-      // Score: winner gets sum of all others' pips
+      // ── Caribbean blocked scoring ─────────────────────────────────────────
+      // Lowest pip total wins. In teams, lowest combined team pip total wins.
+      // Winner scores the sum of opponent pip counts.
       const newScores = { ...(session.scores ?? {}) };
       if (results[0]) {
-        const winnerScore = results.slice(1).reduce((s, r) => s + r.remainingPips, 0);
-        newScores[results[0].playerId] = (newScores[results[0].playerId] ?? 0) + winnerScore;
+        const isTeams = gameMode === "teams";
+        if (isTeams) {
+          // Find winning player and their seat
+          const winnerPlayer = allPlayers.find(p => p.profile_id === results[0].playerId);
+          const winnerSeat   = winnerPlayer?.seat ?? 0;
+          // Opponent team pips
+          const opponentScore = allPlayers
+            .filter(p => p.seat % 2 !== winnerSeat % 2)
+            .reduce((s, p) => s + calculatePips(p.hand ?? []), 0);
+          // Credit both partners
+          allPlayers
+            .filter(p => p.seat % 2 === winnerSeat % 2)
+            .forEach(p => { newScores[p.profile_id] = (newScores[p.profile_id] ?? 0) + opponentScore; });
+        } else {
+          const winnerScore = results.slice(1).reduce((s, r) => s + r.remainingPips, 0);
+          newScores[results[0].playerId] = (newScores[results[0].playerId] ?? 0) + winnerScore;
+        }
       }
 
       await supabase.from("game_sessions").update({
@@ -880,7 +934,7 @@ export default function GameClient({ room, currentProfile }: Props) {
     }
 
     setActionLoading(false);
-    showToast("Passed turn");
+    showToast("🤜 Knocked!");
   }
 
   function handleSort() {
@@ -1858,7 +1912,16 @@ export default function GameClient({ room, currentProfile }: Props) {
                 </div>
 
                 {/* Board chain — full middle, padded so it doesn't clash with pinned opponents */}
-                <div className="flex flex-1 items-center justify-center overflow-hidden z-10 relative px-24 pt-16 pb-2">
+                <div className="flex flex-1 flex-col items-center justify-center overflow-hidden z-10 relative px-24 pt-16 pb-2 gap-1">
+                  {/* Caribbean arm-constraint notice */}
+                  {leftRightBlocked && isMyTurn && (
+                    <div
+                      className="shrink-0 rounded-lg px-3 py-1 text-[10px] font-black text-center"
+                      style={{ background: "rgba(251,191,36,0.15)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.35)" }}
+                    >
+                      ☝️ Play top &amp; bottom arms first
+                    </div>
+                  )}
                   {renderBoard()}
                 </div>
 
@@ -1995,28 +2058,20 @@ export default function GameClient({ room, currentProfile }: Props) {
                   )}
                 </div>
 
-                {/* Center: Draw / Pass / Sort */}
+                {/* Center: Knock / Sort */}
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={handleDraw}
-                    disabled={!isMyTurn || boneyardEmpty || actionLoading}
+                    onClick={handlePass}
+                    disabled={!isMyTurn || hasPlayable || actionLoading}
                     className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                     style={{
-                      background: isMyTurn && !boneyardEmpty ? "rgba(16,185,129,0.12)" : "#111",
-                      border: `1.5px solid ${isMyTurn && !boneyardEmpty ? "rgba(16,185,129,0.5)" : "#2a2a2a"}`,
-                      color: isMyTurn && !boneyardEmpty ? "#10b981" : "#444",
-                      boxShadow: isMyTurn && !boneyardEmpty ? "0 0 12px rgba(16,185,129,0.15)" : "none",
+                      background: isMyTurn && !hasPlayable ? "rgba(239,68,68,0.12)" : "#111",
+                      border: `1.5px solid ${isMyTurn && !hasPlayable ? "rgba(239,68,68,0.5)" : "#2a2a2a"}`,
+                      color: isMyTurn && !hasPlayable ? "#ef4444" : "#444",
+                      boxShadow: isMyTurn && !hasPlayable ? "0 0 12px rgba(239,68,68,0.15)" : "none",
                     }}
                   >
-                    <span>📥</span> DRAW
-                  </button>
-                  <button
-                    onClick={handlePass}
-                    disabled={!isMyTurn || hasPlayable || !boneyardEmpty || actionLoading}
-                    className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                    style={{ background: "#111", border: "1.5px solid #2a2a2a", color: "#444" }}
-                  >
-                    <span>↪</span> PASS
+                    <span>🤜</span> KNOCK
                   </button>
                   <button
                     onClick={handleSort}
