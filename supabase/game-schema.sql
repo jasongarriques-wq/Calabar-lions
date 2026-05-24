@@ -139,9 +139,31 @@ DO $$ BEGIN
   CREATE POLICY "reactions_insert" ON table_reactions FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- Join requests (player asks host to be seated)
+CREATE TABLE IF NOT EXISTS join_requests (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  room_id UUID REFERENCES game_rooms(id) ON DELETE CASCADE NOT NULL,
+  requester_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  requester_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(room_id, requester_id)
+);
+ALTER TABLE join_requests ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  CREATE POLICY "join_requests_read" ON join_requests FOR SELECT USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE POLICY "join_requests_insert" ON join_requests FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE POLICY "join_requests_update" ON join_requests FOR UPDATE USING (auth.uid() IS NOT NULL);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- Enable Realtime on game tables
 ALTER PUBLICATION supabase_realtime ADD TABLE game_sessions;
 ALTER PUBLICATION supabase_realtime ADD TABLE game_players;
 ALTER PUBLICATION supabase_realtime ADD TABLE game_messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE game_rooms;
 ALTER PUBLICATION supabase_realtime ADD TABLE table_reactions;
+ALTER PUBLICATION supabase_realtime ADD TABLE join_requests;
