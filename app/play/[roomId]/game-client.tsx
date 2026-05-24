@@ -5,7 +5,9 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
+import { useVideoChat } from "@/hooks/useVideoChat";
 import DominoTileComponent from "@/components/domino-tile";
+import VideoTile from "@/components/video-tile";
 import type {
   DominoTile,
   GameMessage,
@@ -317,6 +319,9 @@ export default function GameClient({ room, currentProfile }: Props) {
 
   // ── Voice chat (WebRTC peer-to-peer via Supabase broadcast signaling) ──────
   const voice = useVoiceChat(room.id, currentProfile?.id ?? null);
+
+  // ── Video chat (separate WebRTC connection, video-only tracks) ───────────
+  const video = useVideoChat(room.id, currentProfile?.id ?? null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -2647,6 +2652,103 @@ export default function GameClient({ room, currentProfile }: Props) {
                       Waiting for others to join voice…
                     </p>
                   )}
+                </div>
+
+                {/* Video chat */}
+                <div
+                  className="rounded-xl border p-3 space-y-2"
+                  style={{
+                    background: video.active ? "rgba(168,85,247,0.05)" : "#111",
+                    borderColor: video.active ? "rgba(168,85,247,0.35)" : "#222",
+                  }}
+                >
+                  <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: "#52525b" }}>
+                    Video Chat
+                  </p>
+
+                  {/* Error */}
+                  {video.error && (
+                    <p className="text-[10px] rounded-lg px-2 py-1.5" style={{ background: "rgba(239,68,68,0.1)", color: "#f87171", border: "1px solid rgba(239,68,68,0.2)" }}>
+                      {video.error}
+                    </p>
+                  )}
+
+                  {/* Video tiles — self + remotes */}
+                  {video.active && (
+                    <div className="space-y-1.5">
+                      {/* Self view */}
+                      <VideoTile
+                        stream={video.localStream}
+                        label={`${(currentProfile?.full_name ?? currentProfile?.display_name ?? "You").split(" ")[0]} (You)`}
+                        mirror
+                        muted
+                        cameraOff={video.cameraOff}
+                        size="sm"
+                      />
+                      {/* Remote peers */}
+                      {video.remoteStreams.map(rs => {
+                        const player = allPlayers.find(p => p.profile_id === rs.peerId);
+                        const name = player?.display_name ?? rs.displayName ?? "Player";
+                        return (
+                          <VideoTile
+                            key={rs.peerId}
+                            stream={rs.stream}
+                            label={name.split(" ")[0]}
+                            size="sm"
+                          />
+                        );
+                      })}
+                      {video.remoteStreams.length === 0 && (
+                        <p className="text-[10px] text-center" style={{ color: "#52525b" }}>
+                          Waiting for others to join video…
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Controls */}
+                  <div className="flex gap-2">
+                    {!video.active ? (
+                      <button
+                        onClick={video.join}
+                        className="flex-1 rounded-xl py-2 text-xs font-black transition-all hover:scale-[1.02]"
+                        style={{
+                          background: "rgba(168,85,247,0.15)",
+                          border: "1px solid rgba(168,85,247,0.4)",
+                          color: "#c084fc",
+                        }}
+                      >
+                        📹 Join Video
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={video.toggleCamera}
+                          className="flex-1 rounded-xl py-2 text-xs font-black transition-all"
+                          style={{
+                            background: video.cameraOff
+                              ? "rgba(239,68,68,0.15)"
+                              : "rgba(168,85,247,0.15)",
+                            border: `1px solid ${video.cameraOff ? "rgba(239,68,68,0.4)" : "rgba(168,85,247,0.4)"}`,
+                            color: video.cameraOff ? "#f87171" : "#c084fc",
+                          }}
+                        >
+                          {video.cameraOff ? "📷 Cam Off" : "📹 Live"}
+                        </button>
+                        <button
+                          onClick={video.leave}
+                          className="rounded-xl px-3 py-2 text-xs font-black"
+                          style={{
+                            background: "rgba(239,68,68,0.1)",
+                            border: "1px solid rgba(239,68,68,0.3)",
+                            color: "#f87171",
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 {/* Spectators */}
