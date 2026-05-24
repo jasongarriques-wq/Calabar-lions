@@ -41,7 +41,8 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 function dealTiles(playerCount: number, mode: GameMode) {
-  const tiles = mode === "french" ? generateTileSet(mode) : shuffle(generateTileSet(mode));
+  // Always shuffle — Caribbean rules require a fresh random deal every hand.
+  const tiles = shuffle(generateTileSet(mode));
   const perPlayer = mode === "nine-nine" ? (playerCount <= 2 ? 13 : 10) : 7;
   const hands: DominoTile[][] = [];
   for (let i = 0; i < playerCount; i++) {
