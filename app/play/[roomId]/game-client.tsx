@@ -61,7 +61,10 @@ function canPlayEnds(
   topEnd: number | null,
   bottomEnd: number | null
 ): Array<"left" | "right" | "top" | "bottom"> | "first" | "none" {
-  if (leftEnd === null) return "first";
+  // Board is empty only when ALL four ends are null.
+  // (effectiveLeftEnd/Right can be null due to the Caribbean arm constraint
+  //  even when the board has tiles — do NOT use leftEnd===null alone.)
+  if (leftEnd === null && rightEnd === null && topEnd === null && bottomEnd === null) return "first";
   const v0 = tile[0], v1 = tile[1];
   const matches: Array<"left" | "right" | "top" | "bottom"> = [];
   if (leftEnd   !== null && (v0 === leftEnd   || v1 === leftEnd))   matches.push("left");
