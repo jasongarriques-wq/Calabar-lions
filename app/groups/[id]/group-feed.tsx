@@ -3,6 +3,9 @@ import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Profile } from "@/types";
 import { useRouter } from "next/navigation";
+import { useVoiceChat } from "@/hooks/useVoiceChat";
+import { useVideoChat } from "@/hooks/useVideoChat";
+import VideoTile from "@/components/video-tile";
 
 interface GroupFeedProps {
   groupId: string;
@@ -21,6 +24,12 @@ export default function GroupFeed({ groupId, profileId, profile, initialPosts, i
   const [joining, setJoining] = useState(false);
   const supabase = createClient();
   const router = useRouter();
+
+  const myName = profile.full_name ?? profile.display_name ?? "Member";
+
+  // ── Voice & Video hooks ────────────────────────────────────────────────────
+  const voice = useVoiceChat(groupId, profileId, myName);
+  const video = useVideoChat(groupId, profileId, myName);
 
   useEffect(() => {
     const channel = supabase.channel(`group-feed-${groupId}`)
@@ -78,11 +87,182 @@ export default function GroupFeed({ groupId, profileId, profile, initialPosts, i
 
   return (
     <div className="space-y-5">
-      {/* Post composer */}
+
+      {/* ── Voice + Video panel (members only) ───────────────────────────── */}
+      {isMember && (
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-3">
+          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+            Group Call
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* ── Voice chat ──────────────────────────────────────────── */}
+            <div
+              className="rounded-xl border p-3 space-y-2"
+              style={{
+                background: voice.active ? "rgba(16,185,129,0.06)" : "#111",
+                borderColor: voice.active ? "rgba(16,185,129,0.35)" : "#222",
+              }}
+            >
+              <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: "#52525b" }}>
+                Voice
+              </p>
+
+              {/* Error */}
+              {voice.error && (
+                <p className="text-[10px] rounded-lg px-2 py-1" style={{ background: "rgba(239,68,68,0.1)", color: "#f87171", border: "1px solid rgba(239,68,68,0.2)" }}>
+                  {voice.error}
+                </p>
+              )}
+
+              {/* Connected peers */}
+              {voice.active && voice.connectedPeers.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {voice.connectedPeers.map(peerId => {
+                    const name = voice.peerNames[peerId] ?? peerId.slice(0, 6);
+                    return (
+                      <span
+                        key={peerId}
+                        className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}
+                      >
+                        🎤 {name.split(" ")[0]}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Controls */}
+              <div className="flex gap-2">
+                {!voice.active ? (
+                  <button
+                    onClick={voice.join}
+                    className="flex-1 rounded-xl py-2 text-xs font-black transition-all hover:scale-[1.02]"
+                    style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.4)", color: "#10b981" }}
+                  >
+                    🎤 Join
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={voice.toggleMute}
+                      className="flex-1 rounded-xl py-2 text-xs font-black transition-all"
+                      style={{
+                        background: voice.muted ? "rgba(239,68,68,0.15)" : "rgba(16,185,129,0.15)",
+                        border: `1px solid ${voice.muted ? "rgba(239,68,68,0.4)" : "rgba(16,185,129,0.4)"}`,
+                        color: voice.muted ? "#f87171" : "#10b981",
+                      }}
+                    >
+                      {voice.muted ? "🔇 Muted" : "🎤 Live"}
+                    </button>
+                    <button
+                      onClick={voice.leave}
+                      className="rounded-xl px-3 py-2 text-xs font-black"
+                      style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#f87171" }}
+                    >
+                      ✕
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {voice.active && voice.connectedPeers.length === 0 && (
+                <p className="text-[10px] text-center" style={{ color: "#52525b" }}>
+                  Waiting for others…
+                </p>
+              )}
+            </div>
+
+            {/* ── Video chat ──────────────────────────────────────────── */}
+            <div
+              className="rounded-xl border p-3 space-y-2"
+              style={{
+                background: video.active ? "rgba(168,85,247,0.05)" : "#111",
+                borderColor: video.active ? "rgba(168,85,247,0.35)" : "#222",
+              }}
+            >
+              <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: "#52525b" }}>
+                Video
+              </p>
+
+              {/* Error */}
+              {video.error && (
+                <p className="text-[10px] rounded-lg px-2 py-1" style={{ background: "rgba(239,68,68,0.1)", color: "#f87171", border: "1px solid rgba(239,68,68,0.2)" }}>
+                  {video.error}
+                </p>
+              )}
+
+              {/* Video tiles */}
+              {video.active && (
+                <div className="space-y-1.5">
+                  <VideoTile
+                    stream={video.localStream}
+                    label={`${myName.split(" ")[0]} (You)`}
+                    mirror
+                    muted
+                    cameraOff={video.cameraOff}
+                    size="sm"
+                  />
+                  {video.remoteStreams.map(rs => (
+                    <VideoTile
+                      key={rs.peerId}
+                      stream={rs.stream}
+                      label={rs.displayName.split(" ")[0]}
+                      size="sm"
+                    />
+                  ))}
+                  {video.remoteStreams.length === 0 && (
+                    <p className="text-[10px] text-center" style={{ color: "#52525b" }}>
+                      Waiting for others…
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Controls */}
+              <div className="flex gap-2">
+                {!video.active ? (
+                  <button
+                    onClick={video.join}
+                    className="flex-1 rounded-xl py-2 text-xs font-black transition-all hover:scale-[1.02]"
+                    style={{ background: "rgba(168,85,247,0.15)", border: "1px solid rgba(168,85,247,0.4)", color: "#c084fc" }}
+                  >
+                    📹 Join
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={video.toggleCamera}
+                      className="flex-1 rounded-xl py-2 text-xs font-black transition-all"
+                      style={{
+                        background: video.cameraOff ? "rgba(239,68,68,0.15)" : "rgba(168,85,247,0.15)",
+                        border: `1px solid ${video.cameraOff ? "rgba(239,68,68,0.4)" : "rgba(168,85,247,0.4)"}`,
+                        color: video.cameraOff ? "#f87171" : "#c084fc",
+                      }}
+                    >
+                      {video.cameraOff ? "📷 Off" : "📹 Live"}
+                    </button>
+                    <button
+                      onClick={video.leave}
+                      className="rounded-xl px-3 py-2 text-xs font-black"
+                      style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#f87171" }}
+                    >
+                      ✕
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Post composer ───────────────────────────────────────────────── */}
       {isMember && (
         <form onSubmit={handlePost} className="card flex gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-green-700 font-black text-sm">
-            {(profile.full_name ?? profile.display_name ?? "L")[0]}
+            {myName[0]}
           </div>
           <div className="flex-1 flex flex-col gap-2">
             <textarea
@@ -102,11 +282,11 @@ export default function GroupFeed({ groupId, profileId, profile, initialPosts, i
 
       {!isMember && (
         <div className="card text-center py-6 border-dashed">
-          <p className="text-zinc-500 text-sm">Join this group to post and interact with members.</p>
+          <p className="text-zinc-500 text-sm">Join this group to post, call, and interact with members.</p>
         </div>
       )}
 
-      {/* Posts */}
+      {/* ── Posts ───────────────────────────────────────────────────────── */}
       <div className="space-y-4">
         {posts.map((post: any) => (
           <article key={post.id} className="card space-y-3">

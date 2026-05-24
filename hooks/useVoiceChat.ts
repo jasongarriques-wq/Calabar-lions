@@ -27,13 +27,14 @@ export interface VoicePeer {
   speaking: boolean;
 }
 
-export function useVoiceChat(roomId: string, myId: string | null) {
+export function useVoiceChat(roomId: string, myId: string | null, displayName?: string) {
   const supabase = createClient();
 
   const [active, setActive] = useState(false);
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectedPeers, setConnectedPeers] = useState<string[]>([]);
+  const [peerNames, setPeerNames] = useState<Record<string, string>>({});
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const pcsRef        = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -53,6 +54,7 @@ export function useVoiceChat(roomId: string, myId: string | null) {
     const audio = audioElsRef.current.get(peerId);
     if (audio) { audio.srcObject = null; audioElsRef.current.delete(peerId); }
     setConnectedPeers(prev => prev.filter(id => id !== peerId));
+    setPeerNames(prev => { const n = { ...prev }; delete n[peerId]; return n; });
   }, []);
 
   const createPc = useCallback((peerId: string): RTCPeerConnection => {
@@ -114,7 +116,7 @@ export function useVoiceChat(roomId: string, myId: string | null) {
       activeRef.current = true;
       setActive(true);
       // Tell all other voice participants I'm here; they'll send offers
-      broadcast({ type: "join", from: myId });
+      broadcast({ type: "join", from: myId, name: displayName ?? myId });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(
@@ -164,18 +166,23 @@ export function useVoiceChat(roomId: string, myId: string | null) {
       const to = payload.to as string | undefined;
       if (to && to !== myId) return;
 
-      const from = payload.from as string;
-      const type = payload.type as string;
+      const from     = payload.from as string;
+      const fromName = (payload.name as string | undefined) ?? from;
+      const type     = payload.type as string;
       if (!from || from === myId) return;
 
       if (type === "join") {
-        // Existing participant → send offer to the newcomer
+        // Track the joining peer's display name
+        setPeerNames(prev => ({ ...prev, [from]: fromName }));
+        // Existing participant → send offer to the newcomer (include own name)
         const pc = createPc(from);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        broadcast({ type: "offer", from: myId, to: from, sdp: pc.localDescription });
+        broadcast({ type: "offer", from: myId, to: from, sdp: pc.localDescription, name: displayName ?? myId });
 
       } else if (type === "offer") {
+        // Track the offering peer's display name
+        setPeerNames(prev => ({ ...prev, [from]: fromName }));
         // Glare guard: ignore incoming offer if we already have a stable connection
         const existing = pcsRef.current.get(from);
         if (existing && existing.signalingState !== "stable") {
@@ -226,5 +233,5 @@ export function useVoiceChat(roomId: string, myId: string | null) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { active, muted, error, connectedPeers, join, leave, toggleMute };
+  return { active, muted, error, connectedPeers, peerNames, join, leave, toggleMute };
 }

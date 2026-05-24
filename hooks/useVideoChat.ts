@@ -27,7 +27,7 @@ export interface RemoteVideoStream {
   displayName: string;
 }
 
-export function useVideoChat(roomId: string, myId: string | null) {
+export function useVideoChat(roomId: string, myId: string | null, displayName?: string) {
   const supabase = createClient();
 
   const [active, setActive]               = useState(false);
@@ -107,7 +107,7 @@ export function useVideoChat(roomId: string, myId: string | null) {
       setLocalStream(stream);
       activeRef.current = true;
       setActive(true);
-      broadcast({ type: "join", from: myId, name: myId });
+      broadcast({ type: "join", from: myId, name: displayName ?? myId });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(
@@ -165,7 +165,7 @@ export function useVideoChat(roomId: string, myId: string | null) {
         const pc = createPc(from, fromName);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        broadcast({ type: "offer", from: myId, to: from, sdp: pc.localDescription, name: myId });
+        broadcast({ type: "offer", from: myId, to: from, sdp: pc.localDescription, name: displayName ?? myId });
 
       } else if (type === "offer") {
         const existing = pcsRef.current.get(from);
