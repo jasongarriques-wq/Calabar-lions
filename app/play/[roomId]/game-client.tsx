@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
+import { useVoiceChat } from "@/hooks/useVoiceChat";
 import DominoTileComponent from "@/components/domino-tile";
 import type {
   DominoTile,
@@ -313,6 +314,9 @@ export default function GameClient({ room, currentProfile }: Props) {
   const autoRestartRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [pendingRequests, setPendingRequests] = useState<JoinRequest[]>([]);
   const [myJoinRequest, setMyJoinRequest] = useState<JoinRequest | null>(null);
+
+  // ── Voice chat (WebRTC peer-to-peer via Supabase broadcast signaling) ──────
+  const voice = useVoiceChat(room.id, currentProfile?.id ?? null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -2554,16 +2558,96 @@ export default function GameClient({ room, currentProfile }: Props) {
                 </div>
 
                 {/* Voice chat */}
-                <button
-                  className="w-full rounded-xl py-2.5 text-xs font-black transition-all hover:scale-[1.01]"
+                <div
+                  className="rounded-xl border p-3 space-y-2"
                   style={{
-                    background: "rgba(16,185,129,0.1)",
-                    border: "1px solid rgba(16,185,129,0.3)",
-                    color: "#10b981",
+                    background: voice.active
+                      ? "rgba(16,185,129,0.06)"
+                      : "#111",
+                    borderColor: voice.active
+                      ? "rgba(16,185,129,0.35)"
+                      : "#222",
                   }}
                 >
-                  🎤 VOICE CHAT
-                </button>
+                  <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: "#52525b" }}>
+                    Voice Chat
+                  </p>
+
+                  {/* Error */}
+                  {voice.error && (
+                    <p className="text-[10px] rounded-lg px-2 py-1.5" style={{ background: "rgba(239,68,68,0.1)", color: "#f87171", border: "1px solid rgba(239,68,68,0.2)" }}>
+                      {voice.error}
+                    </p>
+                  )}
+
+                  {/* Connected peers */}
+                  {voice.active && voice.connectedPeers.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {voice.connectedPeers.map(peerId => {
+                        const p = allPlayers.find(pl => pl.profile_id === peerId);
+                        return (
+                          <span
+                            key={peerId}
+                            className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+                            style={{ background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}
+                          >
+                            🎤 {(p?.display_name ?? "Player").split(" ")[0]}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Controls */}
+                  <div className="flex gap-2">
+                    {!voice.active ? (
+                      <button
+                        onClick={voice.join}
+                        className="flex-1 rounded-xl py-2 text-xs font-black transition-all hover:scale-[1.02]"
+                        style={{
+                          background: "rgba(16,185,129,0.15)",
+                          border: "1px solid rgba(16,185,129,0.4)",
+                          color: "#10b981",
+                        }}
+                      >
+                        🎤 Join Voice
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={voice.toggleMute}
+                          className="flex-1 rounded-xl py-2 text-xs font-black transition-all"
+                          style={{
+                            background: voice.muted
+                              ? "rgba(239,68,68,0.15)"
+                              : "rgba(16,185,129,0.15)",
+                            border: `1px solid ${voice.muted ? "rgba(239,68,68,0.4)" : "rgba(16,185,129,0.4)"}`,
+                            color: voice.muted ? "#f87171" : "#10b981",
+                          }}
+                        >
+                          {voice.muted ? "🔇 Muted" : "🎤 Live"}
+                        </button>
+                        <button
+                          onClick={voice.leave}
+                          className="rounded-xl px-3 py-2 text-xs font-black transition-all"
+                          style={{
+                            background: "rgba(239,68,68,0.1)",
+                            border: "1px solid rgba(239,68,68,0.3)",
+                            color: "#f87171",
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {voice.active && voice.connectedPeers.length === 0 && (
+                    <p className="text-[10px] text-center" style={{ color: "#52525b" }}>
+                      Waiting for others to join voice…
+                    </p>
+                  )}
+                </div>
 
                 {/* Spectators */}
                 <div>
