@@ -598,17 +598,22 @@ export default function GameClient({ room, currentProfile }: Props) {
     const playerCount = Math.max(seatedPlayers.length, 1);
     const { hands, boneyard } = dealTiles(playerCount, mode);
 
-    // Find who has highest double for first turn
+    // Determine first player:
+    //   Round 1 → player with the highest double (double-six starts)
+    //   Round 2+ → winner of the previous round (stored in session.current_turn)
+    const isFirstGame = !session?.id;
     let firstTurnIdx = 0;
-    let highestDouble = -1;
-    hands.forEach((hand, i) => {
-      hand.forEach((tile) => {
-        if (tile[0] === tile[1] && tile[0] > highestDouble) {
-          highestDouble = tile[0];
-          firstTurnIdx = i;
-        }
+    if (isFirstGame) {
+      let highestDouble = -1;
+      hands.forEach((hand, i) => {
+        hand.forEach((tile) => {
+          if (tile[0] === tile[1] && tile[0] > highestDouble) {
+            highestDouble = tile[0];
+            firstTurnIdx = i;
+          }
+        });
       });
-    });
+    }
 
     let sessionId = session?.id;
     if (!sessionId) {
@@ -651,7 +656,14 @@ export default function GameClient({ room, currentProfile }: Props) {
       );
     }
 
-    const firstTurnProfileId = allProfileIds[firstTurnIdx] ?? currentProfile.id;
+    // For subsequent rounds, the winner (stored in session.current_turn) goes first.
+    // For the very first game, use the player with the highest double.
+    let firstTurnProfileId: string;
+    if (!isFirstGame && session?.current_turn && allProfileIds.includes(session.current_turn)) {
+      firstTurnProfileId = session.current_turn;
+    } else {
+      firstTurnProfileId = allProfileIds[firstTurnIdx] ?? currentProfile.id;
+    }
     const scores: Record<string, number> = {};
     allProfileIds.forEach((id) => { scores[id] = seatedPlayers.find((p) => p.profile_id === id)?.score ?? 0; });
 
@@ -724,11 +736,6 @@ export default function GameClient({ room, currentProfile }: Props) {
 
     const tile    = myHand[tileIdx];
 
-    // ── Caribbean rule: first tile of the game must be a double ─────────────
-    if ((session.board ?? []).length === 0 && tile[0] !== tile[1]) {
-      showToast("First play must be a double! 🎯"); return;
-    }
-
     const matches = canPlayEnds(tile, effectiveLeftEnd, effectiveRightEnd, topEnd, bottomEnd);
     if (matches === "none") { showToast("That tile can't be played here!"); return; }
 
@@ -747,9 +754,8 @@ export default function GameClient({ room, currentProfile }: Props) {
       arm  = "right";
       lEnd = tile[0];
       rEnd = tile[1];
-      // First tile is always a double → immediately open spinner
-      tEnd = tile[0];
-      bEnd = tile[0];
+      // If the first tile is a double, it immediately becomes the spinner
+      if (tile[0] === tile[1]) { tEnd = tile[0]; bEnd = tile[0]; }
       board.push({ tile, flipped: false, arm });
     } else {
       // ── Determine which end ──────────────────────────────────────────────
@@ -837,8 +843,9 @@ export default function GameClient({ room, currentProfile }: Props) {
         newScores[currentProfile.id] = (newScores[currentProfile.id] ?? 0) + roundScore;
       }
 
+      // Store winner as current_turn so next round knows who plays first
       await supabase.from("game_sessions").update({
-        board, left_end: lEnd, right_end: rEnd, current_turn: nextTurn,
+        board, left_end: lEnd, right_end: rEnd, current_turn: currentProfile.id,
         scores: newScores, status: "finished", consecutive_passes: 0,
         updated_at: new Date().toISOString(),
       }).eq("id", session.id);
@@ -921,8 +928,10 @@ export default function GameClient({ room, currentProfile }: Props) {
         }
       }
 
+      // Store winner as current_turn so next round knows who plays first
+      const blockWinnerId = results[0]?.playerId ?? nextTurn;
       await supabase.from("game_sessions").update({
-        current_turn: nextTurn, consecutive_passes: newPasses, scores: newScores,
+        current_turn: blockWinnerId, consecutive_passes: newPasses, scores: newScores,
         status: "finished", updated_at: new Date().toISOString(),
       }).eq("id", session.id);
       await supabase.from("game_rooms").update({ status: "finished" }).eq("id", room.id);
